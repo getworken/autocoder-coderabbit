@@ -22,6 +22,16 @@ interface ProjectSelectorProps {
   onSpecCreatingChange?: (isCreating: boolean) => void
 }
 
+/**
+ * Renders a dropdown UI for selecting, creating, and deleting projects.
+ *
+ * The component shows the currently selected project (with stats if available),
+ * a list of existing projects with delete controls, and an option to create a new project.
+ *
+ * @param onSelectProject - Callback invoked with the selected project name, or `null` to clear selection
+ * @param onSpecCreatingChange - Optional callback that receives `true` when the new-project creation flow is in the "chat" step and `false` otherwise
+ * @returns The rendered ProjectSelector component
+ */
 export function ProjectSelector({
   projects,
   selectedProject,

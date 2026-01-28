@@ -42,17 +42,16 @@ class KillResult:
 
 
 def _kill_windows_process_tree_taskkill(pid: int) -> bool:
-    """Use Windows taskkill command to forcefully kill a process tree.
-
-    This is a fallback method that uses the Windows taskkill command with /T (tree)
-    and /F (force) flags, which is more reliable for killing nested cmd/bash/node
-    process trees on Windows.
-
-    Args:
-        pid: Process ID to kill along with its entire tree
-
+    """
+    Attempt to kill a process and its descendant processes on Windows using the `taskkill` utility.
+    
+    This acts as a Windows-specific fallback that invokes `taskkill` with tree and force flags to remove nested process trees.
+    
+    Parameters:
+        pid (int): PID of the process whose process tree should be terminated.
+    
     Returns:
-        True if taskkill succeeded, False otherwise
+        bool: `True` if the `taskkill` command exited with code 0, `False` otherwise.
     """
     if not IS_WINDOWS:
         return False
@@ -71,18 +70,17 @@ def _kill_windows_process_tree_taskkill(pid: int) -> bool:
 
 
 def kill_process_tree(proc: subprocess.Popen, timeout: float = 5.0) -> KillResult:
-    """Kill a process and all its child processes.
-
-    On Windows, subprocess.terminate() only kills the immediate process, leaving
-    orphaned child processes (e.g., spawned browser instances, coding/testing agents).
-    This function uses psutil to kill the entire process tree.
-
-    Args:
-        proc: The subprocess.Popen object to kill
-        timeout: Seconds to wait for graceful termination before force-killing
-
+    """
+    Kill the given process and its descendant processes.
+    
+    Parameters:
+        proc (subprocess.Popen): The subprocess to terminate.
+        timeout (float): Seconds to wait for graceful termination before force-killing.
+    
     Returns:
-        KillResult with status and statistics about the termination
+        KillResult: Outcome of the operation containing `status` ("success", "partial", or "failure"),
+        `parent_pid`, and counts for `children_found`, `children_terminated`, `children_killed`,
+        and `parent_forcekilled`.
     """
     result = KillResult(status="success", parent_pid=proc.pid)
 
@@ -182,14 +180,13 @@ def kill_process_tree(proc: subprocess.Popen, timeout: float = 5.0) -> KillResul
 
 
 def cleanup_orphaned_agent_processes() -> int:
-    """Clean up orphaned agent processes from previous runs.
-
-    On Windows, agent subprocesses (bash, cmd, node, conhost) may remain orphaned
-    if the server was killed abruptly. This function finds and terminates processes
-    that look like orphaned autocoder agents based on command line patterns.
-
+    """
+    Terminate orphaned agent subprocesses on Windows that match known agent command-line patterns.
+    
+    This function scans running processes for command lines containing known agent identifiers and forcefully terminates matching process trees on Windows. On non-Windows platforms it performs no action.
+    
     Returns:
-        Number of processes terminated
+        int: Number of processes terminated
     """
     if not IS_WINDOWS:
         return 0

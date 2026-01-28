@@ -51,7 +51,12 @@ class TerminalCloseCode:
 
 
 def _get_project_path(project_name: str) -> Path | None:
-    """Get project path from registry."""
+    """
+    Retrieve the filesystem path for the given project name from the project registry.
+    
+    Returns:
+        Path | None: Path to the project directory, or `None` if the project is not registered.
+    """
     return registry_get_project_path(project_name)
 
 
@@ -127,14 +132,18 @@ async def create_project_terminal(
     project_name: str, request: CreateTerminalRequest
 ) -> TerminalInfoResponse:
     """
-    Create a new terminal for a project.
-
-    Args:
-        project_name: Name of the project
-        request: Request body with optional terminal name
-
+    Create a new terminal for the given project.
+    
+    Parameters:
+        project_name (str): Project identifier; must be a valid project name.
+        request (CreateTerminalRequest): Optional terminal creation fields (e.g., `name`).
+    
+    Raises:
+        HTTPException: 400 if the project name is invalid.
+        HTTPException: 404 if the project is not found.
+    
     Returns:
-        The created terminal info
+        TerminalInfoResponse: Metadata for the created terminal (`id`, `name`, `created_at`).
     """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
@@ -152,15 +161,19 @@ async def rename_project_terminal(
     project_name: str, terminal_id: str, request: RenameTerminalRequest
 ) -> TerminalInfoResponse:
     """
-    Rename a terminal.
-
-    Args:
-        project_name: Name of the project
-        terminal_id: ID of the terminal to rename
-        request: Request body with new name
-
+    Rename an existing terminal within a project.
+    
+    Parameters:
+        project_name (str): Project identifier.
+        terminal_id (str): Terminal identifier to rename.
+        request (RenameTerminalRequest): Request containing the new terminal name.
+    
     Returns:
-        The updated terminal info
+        TerminalInfoResponse: Updated terminal information (`id`, `name`, `created_at`).
+    
+    Raises:
+        HTTPException: 400 if the project name or terminal ID are invalid.
+        HTTPException: 404 if the project is not found or the terminal does not exist / rename failed.
     """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
@@ -185,14 +198,19 @@ async def rename_project_terminal(
 @router.delete("/{project_name}/{terminal_id}")
 async def delete_project_terminal(project_name: str, terminal_id: str) -> dict:
     """
-    Delete a terminal and stop its session.
-
-    Args:
-        project_name: Name of the project
-        terminal_id: ID of the terminal to delete
-
+    Delete a terminal and stop its active session for a project.
+    
+    Stops any running session for the specified terminal, removes its metadata, and returns a confirmation message.
+    
+    Parameters:
+        project_name (str): Project identifier.
+        terminal_id (str): Terminal identifier.
+    
     Returns:
-        Success message
+        dict: A confirmation object: {"message": "Terminal deleted"}.
+    
+    Raises:
+        HTTPException: 400 if the project name or terminal ID is invalid; 404 if the project or terminal is not found.
     """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
@@ -220,20 +238,25 @@ async def delete_project_terminal(project_name: str, terminal_id: str) -> dict:
 @router.websocket("/ws/{project_name}/{terminal_id}")
 async def terminal_websocket(websocket: WebSocket, project_name: str, terminal_id: str) -> None:
     """
-    WebSocket endpoint for interactive terminal I/O.
-
-    Message protocol:
-
-    Client -> Server:
-    - {"type": "input", "data": "<base64-encoded-bytes>"} - Keyboard input
-    - {"type": "resize", "cols": 80, "rows": 24} - Terminal resize
-    - {"type": "ping"} - Keep-alive ping
-
-    Server -> Client:
-    - {"type": "output", "data": "<base64-encoded-bytes>"} - PTY output
-    - {"type": "exit", "code": 0} - Shell process exited
-    - {"type": "pong"} - Keep-alive response
-    - {"type": "error", "message": "..."} - Error message
+    Handle a WebSocket connection providing interactive PTY terminal I/O for a project terminal.
+    
+    Uses a simple JSON message protocol over the WebSocket. Client -> Server messages:
+    - {"type": "input", "data": "<base64-encoded-bytes>"}: keyboard input to the PTY.
+    - {"type": "resize", "cols": <int>, "rows": <int>}: request to resize the PTY.
+    - {"type": "ping"}: keep-alive ping.
+    
+    Server -> Client messages:
+    - {"type": "output", "data": "<base64-encoded-bytes>"}: binary output from the PTY (base64-encoded).
+    - {"type": "exit", "code": 0}: notification that the shell process exited.
+    - {"type": "pong"}: keep-alive response.
+    - {"type": "error", "message": "..."}: error description.
+    
+    Behavior notes:
+    - Validates project name and terminal ID and rejects unauthorized connections.
+    - Defers PTY creation until an initial resize is received to ensure correct dimensions.
+    - Enforces a 64KB limit on base64-encoded input to mitigate DoS.
+    - Streams PTY output to the client and notifies the client when the session exits.
+    - Cleans up callbacks and stops the session when the last client disconnects.
     """
     # Check authentication if Basic Auth is enabled
     if not await reject_unauthenticated_websocket(websocket):

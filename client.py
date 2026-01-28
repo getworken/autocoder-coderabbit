@@ -53,10 +53,12 @@ DEFAULT_MAX_OUTPUT_TOKENS = "131072"
 
 def get_playwright_headless() -> bool:
     """
-    Get the Playwright headless mode setting.
-
-    Reads from PLAYWRIGHT_HEADLESS environment variable, defaults to True.
-    Returns True for headless mode (invisible browser), False for visible browser.
+    Return whether Playwright should run in headless mode.
+    
+    Reads the PLAYWRIGHT_HEADLESS environment variable and interprets "true", "1", "yes", "on" as headless and "false", "0", "no", "off" as headed. If the value is unset or invalid, the function falls back to DEFAULT_PLAYWRIGHT_HEADLESS.
+    
+    Returns:
+        `true` if headless, `false` otherwise.
     """
     value = os.getenv("PLAYWRIGHT_HEADLESS", str(DEFAULT_PLAYWRIGHT_HEADLESS).lower()).strip().lower()
     truthy = {"true", "1", "yes", "on"}
@@ -166,26 +168,18 @@ def create_client(
     agent_id: str | None = None,
 ):
     """
-    Create a Claude Agent SDK client with multi-layered security.
-
-    Args:
-        project_dir: Directory for the project
-        model: Claude model to use
-        yolo_mode: If True, skip Playwright MCP server for rapid prototyping
-        agent_id: Optional unique identifier for browser isolation in parallel mode.
-                  When provided, each agent gets its own browser profile.
-
+    Create and configure a ClaudeSDKClient for a project with layered security and optional Playwright integration.
+    
+    Ensures the project directory exists and writes a per-project security settings file (.claude_settings.json), configures allowed tools, permissions, MCP servers (features and optional Playwright), security hooks, compaction hook, and API environment overrides passed to the Claude CLI subprocess.
+    
+    Parameters:
+        project_dir (Path): Project directory used as the client's working directory and the scope for filesystem permissions; created if it does not exist.
+        model (str): Claude model identifier to use.
+        yolo_mode (bool): If True, omit the Playwright MCP server and related Playwright tools/permissions for faster prototyping.
+        agent_id (str | None): Optional identifier to enable isolated browser contexts per agent when Playwright is enabled.
+    
     Returns:
-        Configured ClaudeSDKClient (from claude_agent_sdk)
-
-    Security layers (defense in depth):
-    1. Sandbox - OS-level bash command isolation prevents filesystem escape
-    2. Permissions - File operations restricted to project_dir only
-    3. Security hooks - Bash commands validated against an allowlist
-       (see security.py for ALLOWED_COMMANDS)
-
-    Note: Authentication is handled by start.bat/start.sh before this runs.
-    The Claude SDK auto-detects credentials from the Claude CLI configuration
+        ClaudeSDKClient: A fully configured ClaudeSDKClient instance ready to run within the specified project directory.
     """
     # Build allowed tools list based on mode
     # In YOLO mode, exclude Playwright tools for faster prototyping
@@ -318,7 +312,17 @@ def create_client(
 
     # Create a wrapper for bash_security_hook that passes project_dir via context
     async def bash_hook_with_context(input_data, tool_use_id=None, context=None):
-        """Wrapper that injects project_dir into context for security hook."""
+        """
+        Injects the project directory into the hook context and delegates validation to the bash security hook.
+        
+        Parameters:
+            input_data: The hook input payload provided to the bash security hook.
+            tool_use_id (optional): Identifier for the tool invocation, if available.
+            context (optional): Existing hook context; the function will add a `project_dir` entry (absolute path) before invoking the security hook.
+        
+        Returns:
+            The JSON output returned by `bash_security_hook` (hook validation result).
+        """
         if context is None:
             context = {}
         context["project_dir"] = str(project_dir.resolve())
@@ -333,14 +337,19 @@ def create_client(
         context: HookContext,
     ) -> SyncHookJSONOutput:
         """
-        Hook called before context compaction occurs.
-
-        Compaction triggers:
-        - "auto": Automatic compaction when context approaches token limits
-        - "manual": User-initiated compaction via /compact command
-
-        The hook can customize compaction via hookSpecificOutput:
-        - customInstructions: String with focus areas for summarization
+        Called before the agent's context is compacted to allow optional guidance or to override compaction behavior.
+        
+        This hook reads input_data keys:
+        - "trigger": either "auto" when compaction is automatic or "manual" when user-initiated.
+        - "custom_instructions": optional string with summarization focus areas; if provided it will be logged.
+        
+        Parameters:
+            input_data (HookInput): Hook input; may include "trigger" and "custom_instructions".
+            tool_use_id (str | None): Identifier for the tool use that triggered the hook (may be None).
+            context (HookContext): Current hook execution context.
+        
+        Returns:
+            SyncHookJSONOutput: Empty output to permit the default compaction behavior, or a structure with `"hookSpecificOutput"` containing `"hookEventName": "PreCompact"` and `"customInstructions"` to customize compaction.
         """
         trigger = input_data.get("trigger", "auto")
         custom_instructions = input_data.get("custom_instructions")

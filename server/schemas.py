@@ -457,6 +457,18 @@ class SettingsUpdate(BaseModel):
     @field_validator('testing_agent_ratio')
     @classmethod
     def validate_testing_ratio(cls, v: int | None) -> int | None:
+        """
+        Validate that a testing agent ratio is within the allowed range 0–3.
+        
+        Parameters:
+            v (int | None): Proposed `testing_agent_ratio` value.
+        
+        Returns:
+            int | None: The original value when within range or `None`.
+        
+        Raises:
+            ValueError: If `v` is not `None` and is less than 0 or greater than 3.
+        """
         if v is not None and (v < 0 or v > 3):
             raise ValueError("testing_agent_ratio must be between 0 and 3")
         return v
@@ -464,6 +476,18 @@ class SettingsUpdate(BaseModel):
     @field_validator('preferred_ide')
     @classmethod
     def validate_preferred_ide(cls, v: str | None) -> str | None:
+        """
+        Validate that the preferred IDE identifier is one of the allowed values.
+        
+        Parameters:
+            v (str | None): Preferred IDE identifier to validate; may be None to clear the setting.
+        
+        Returns:
+            str | None: The input `v` if it is None or a valid identifier.
+        
+        Raises:
+            ValueError: If `v` is not None and is not one of ['vscode', 'cursor', 'antigravity'].
+        """
         valid_ides = ['vscode', 'cursor', 'antigravity']
         if v is not None and v not in valid_ides:
             raise ValueError(f"Invalid IDE. Must be one of: {valid_ides}")

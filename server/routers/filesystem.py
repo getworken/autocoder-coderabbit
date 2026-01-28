@@ -163,7 +163,17 @@ def is_path_blocked(path: Path) -> bool:
 
 
 def is_hidden_file(path: Path) -> bool:
-    """Check if a file/directory is hidden (cross-platform)."""
+    """
+    Determine whether the given filesystem path refers to a hidden file or directory.
+    
+    Performs Unicode NFKC normalization on the final path component; names starting with '.' are treated as hidden (Unix-style), and on Windows the FILE_ATTRIBUTE_HIDDEN attribute is also considered.
+    
+    Parameters:
+        path (Path): Filesystem path to check.
+    
+    Returns:
+        bool: `True` if the path is considered hidden, `False` otherwise.
+    """
     # Normalize name to prevent Unicode bypass attacks
     name = normalize_name(path.name)
 
@@ -185,7 +195,12 @@ def is_hidden_file(path: Path) -> bool:
 
 
 def matches_blocked_pattern(name: str) -> bool:
-    """Check if filename matches a blocked pattern."""
+    """
+    Determine whether a filename matches any configured blocked or hidden pattern.
+    
+    Returns:
+        `true` if the normalized name matches any configured pattern, `false` otherwise.
+    """
     # Normalize name to prevent Unicode bypass attacks
     normalized_name = normalize_name(name)
     for pattern in HIDDEN_PATTERNS:

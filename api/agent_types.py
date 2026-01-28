@@ -25,5 +25,10 @@ class AgentType(str, Enum):
     TESTING = "testing"
 
     def __str__(self) -> str:
-        """Return the string value for string operations."""
+        """
+        Return the enum member's underlying string value.
+        
+        Returns:
+            str: The underlying string value of the enum member.
+        """
         return self.value

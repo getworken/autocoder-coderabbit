@@ -83,7 +83,15 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 def get_project_stats(project_dir: Path) -> ProjectStats:
-    """Get statistics for a project."""
+    """
+    Compute statistics for a project.
+    
+    Parameters:
+        project_dir (Path): Path to the project's root directory.
+    
+    Returns:
+        ProjectStats: Aggregated test statistics containing `passing`, `in_progress`, `total`, and `percentage` (rounded to one decimal place).
+    """
     _init_imports()
     passing, in_progress, total = _count_passing_tests(project_dir)
     percentage = (passing / total * 100) if total > 0 else 0.0
@@ -127,7 +135,27 @@ async def list_projects():
 
 @router.post("", response_model=ProjectSummary)
 async def create_project(project: ProjectCreate):
-    """Create a new project at the specified path."""
+    """
+    Create a new project directory and register it in the project registry.
+    
+    Validate the requested project name and path, ensure the path is not already
+    registered or blocked, create the directory if needed, scaffold project prompts,
+    and register the project.
+    
+    Parameters:
+        project (ProjectCreate): Payload containing the desired project `name` and `path`.
+    
+    Returns:
+        ProjectSummary: Summary of the newly created project with `has_spec` set to `False`
+        and zeroed statistics.
+    
+    Raises:
+        HTTPException: 
+            - 409 if the project name or path is already registered.
+            - 403 if the path is in a blocked/system location.
+            - 400 if the path exists but is not a directory.
+            - 500 if directory creation or registry registration fails.
+    """
     _init_imports()
     register_project, _, get_project_path, list_registered_projects, _ = _get_registry_functions()
 
@@ -206,19 +234,23 @@ async def create_project(project: ProjectCreate):
 @router.post("/import", response_model=ProjectSummary)
 async def import_project(project: ProjectCreate):
     """
-    Import/reconnect to an existing project after reinstallation.
-
-    This endpoint allows reconnecting to a project that exists on disk
-    but is not registered in the current autocoder installation's registry.
-
-    The project path must:
-    - Exist as a directory
-    - Contain a .autocoder folder (indicating it was previously an autocoder project)
-
-    This is useful when:
-    - Reinstalling autocoder
-    - Moving to a new machine
-    - Recovering from registry corruption
+    Register an existing on-disk Autocoder project in the current registry.
+    
+    Validates the provided project name and path, ensures the path exists, is a directory, is an Autocoder project (contains a `.autocoder` folder), is not blocked, and that neither the name nor the path are already registered before registering the project and returning its summary.
+    
+    Parameters:
+        project (ProjectCreate): Object containing `name` (desired project name) and `path` (filesystem path to the existing project).
+    
+    Returns:
+        ProjectSummary: Summary of the registered project containing `name`, `path`, `has_spec`, and `stats`.
+    
+    Raises:
+        HTTPException: 
+            - 409 if the project name is already registered or the path is already registered under another name.
+            - 404 if the provided path does not exist.
+            - 400 if the path exists but is not a directory, or if it lacks a `.autocoder` folder.
+            - 403 if the path is a blocked/system-sensitive directory.
+            - 500 if registration fails due to an internal error.
     """
     _init_imports()
     register_project, _, get_project_path, list_registered_projects, _ = _get_registry_functions()
@@ -301,7 +333,18 @@ async def import_project(project: ProjectCreate):
 
 @router.get("/{name}", response_model=ProjectDetail)
 async def get_project(name: str):
-    """Get detailed information about a project."""
+    """
+    Retrieve detailed metadata and status for a registered project.
+    
+    Parameters:
+        name (str): Registered project name to look up.
+    
+    Returns:
+        ProjectDetail: Object containing the project's name, filesystem path, whether an app spec exists (`has_spec`), computed statistics (`stats`), and the prompts directory path (`prompts_dir`).
+    
+    Raises:
+        HTTPException: 404 if the project name is not registered or the project directory no longer exists on disk.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -330,11 +373,19 @@ async def get_project(name: str):
 @router.delete("/{name}")
 async def delete_project(name: str, delete_files: bool = False):
     """
-    Delete a project from the registry.
-
-    Args:
-        name: Project name to delete
-        delete_files: If True, also delete the project directory and files
+    Remove a project from the registry and optionally delete its on-disk files.
+    
+    Parameters:
+        name (str): Name of the project to remove.
+        delete_files (bool): If True, remove the project's directory and all contents from disk.
+    
+    Returns:
+        dict: A status payload with keys `success` (`True`) and `message` describing the outcome.
+    
+    Raises:
+        HTTPException(404): If the project name is not registered.
+        HTTPException(409): If the project has a running agent (presence of `.agent.lock`).
+        HTTPException(500): If deleting the project files fails.
     """
     _init_imports()
     _, unregister_project, get_project_path, _, _ = _get_registry_functions()
@@ -372,26 +423,21 @@ async def delete_project(name: str, delete_files: bool = False):
 @router.post("/{name}/reset")
 async def reset_project(name: str, full_reset: bool = False):
     """
-    Reset a project to its initial state.
-
-    This clears all features, assistant chat history, and settings.
-    Use this to restart a project from scratch without having to re-register it.
-
-    Args:
-        name: Project name to reset
-        full_reset: If True, also deletes prompts directory for complete fresh start
-
-    Always Deletes:
-    - features.db (feature tracking database)
-    - assistant.db (assistant chat history)
-    - .claude_settings.json (agent settings)
-    - .claude_assistant_settings.json (assistant settings)
-
-    When full_reset=True, Also Deletes:
-    - prompts/ directory (app_spec.txt, initializer_prompt.md, coding_prompt.md)
-
-    Preserves:
-    - Project registration in registry
+    Reset a registered project by removing runtime data and, optionally, its prompts.
+    
+    Removes persistent runtime files (databases and agent/assistant settings). If `full_reset` is True,
+    also removes the project's prompts directory. This operation preserves the project's registry entry.
+    
+    Parameters:
+        name (str): The registered project name to reset.
+        full_reset (bool): If True, also delete the project's `prompts/` directory.
+    
+    Returns:
+        dict: A summary of the reset with keys:
+            - `success` (bool): Whether the reset completed.
+            - `message` (str): Human-readable result message.
+            - `deleted_files` (List[str]): Names of files/directories removed.
+            - `full_reset` (bool): Mirrors the input `full_reset` flag.
     """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
@@ -460,11 +506,19 @@ async def reset_project(name: str, full_reset: bool = False):
 
 @router.post("/{name}/open-in-ide")
 async def open_project_in_ide(name: str, ide: str):
-    """Open a project in the specified IDE.
-
-    Args:
-        name: Project name
-        ide: IDE to use ('vscode', 'cursor', or 'antigravity')
+    """
+    Open the named project directory in the specified IDE.
+    
+    Parameters:
+        name (str): Registered project name to open.
+        ide (str): IDE identifier to launch; one of "vscode", "cursor", or "antigravity".
+    
+    Returns:
+        dict: A status payload with keys `status` and `message` describing the action.
+    
+    Raises:
+        HTTPException: If the project is not registered or its directory is missing, if `ide` is invalid,
+                       if the IDE executable cannot be found on PATH, or if launching the IDE fails.
     """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
@@ -519,7 +573,21 @@ async def open_project_in_ide(name: str, ide: str):
 
 @router.get("/{name}/prompts", response_model=ProjectPrompts)
 async def get_project_prompts(name: str):
-    """Get the content of project prompt files."""
+    """
+    Return the text contents of a project's prompt files.
+    
+    Parameters:
+        name (str): Project name; will be validated and looked up in the project registry.
+    
+    Returns:
+        ProjectPrompts: Object containing:
+            - app_spec (str): Contents of `app_spec.txt` or empty string if missing or unreadable.
+            - initializer_prompt (str): Contents of `initializer_prompt.md` or empty string if missing or unreadable.
+            - coding_prompt (str): Contents of `coding_prompt.md` or empty string if missing or unreadable.
+    
+    Raises:
+        HTTPException: 404 if the project is not registered or its directory does not exist.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -582,7 +650,18 @@ async def update_project_prompts(name: str, prompts: ProjectPromptsUpdate):
 
 @router.get("/{name}/stats", response_model=ProjectStats)
 async def get_project_stats_endpoint(name: str):
-    """Get current progress statistics for a project."""
+    """
+    Return summary statistics for the named project.
+    
+    Parameters:
+        name (str): Project name to look up (will be validated).
+    
+    Returns:
+        ProjectStats: Aggregated project statistics including passing, in_progress, total, and percent.
+    
+    Raises:
+        HTTPException: 404 if the project is not registered or its directory does not exist.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -600,10 +679,14 @@ async def get_project_stats_endpoint(name: str):
 
 @router.get("/{name}/db-health", response_model=DatabaseHealth)
 async def get_database_health(name: str):
-    """Check database health for a project.
-
-    Returns integrity status, journal mode, and any errors.
-    Use this to diagnose database corruption issues.
+    """
+    Check the SQLite database health for a named project.
+    
+    Returns:
+        DatabaseHealth: Health report containing integrity status, journal mode, and any detected errors.
+    
+    Raises:
+        HTTPException: 404 if the project is not registered or the project directory does not exist.
     """
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -634,13 +717,32 @@ async def get_database_health(name: str):
 # =============================================================================
 
 def get_knowledge_dir(project_dir: Path) -> Path:
-    """Get the knowledge directory for a project."""
+    """
+    Get the project's knowledge directory path.
+    
+    Parameters:
+        project_dir (Path): Root directory of the project.
+    
+    Returns:
+        Path: Path pointing to the 'knowledge' subdirectory inside the project directory.
+    """
     return project_dir / "knowledge"
 
 
 @router.get("/{name}/knowledge", response_model=KnowledgeFileList)
 async def list_knowledge_files(name: str):
-    """List all knowledge files for a project."""
+    """
+    List markdown knowledge files stored for the specified project.
+    
+    Parameters:
+        name (str): Project name to resolve and enumerate knowledge files for.
+    
+    Returns:
+        KnowledgeFileList: An object containing `files` (list of knowledge file records with `name`, `size` in bytes, and `modified` datetime) and `count` (number of files). Returns an empty list and count 0 if the knowledge directory does not exist.
+    
+    Raises:
+        HTTPException: 404 if the project is not registered or the project directory does not exist.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -677,7 +779,19 @@ async def list_knowledge_files(name: str):
 
 @router.get("/{name}/knowledge/{filename}", response_model=KnowledgeFileContent)
 async def get_knowledge_file(name: str, filename: str):
-    """Get the content of a specific knowledge file."""
+    """
+    Retrieve the UTF-8 content of a project's knowledge markdown file.
+    
+    Parameters:
+        name (str): Project name to look up in the registry.
+        filename (str): Markdown filename to read; must match the pattern `^[a-zA-Z0-9_\-\.]+\.md$`.
+    
+    Returns:
+        KnowledgeFileContent: Object containing the `name` (filename) and `content` of the file.
+    
+    Raises:
+        HTTPException: 400 if the filename is invalid; 404 if the project, project directory, or file is not found; 500 if the file cannot be read.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -709,7 +823,22 @@ async def get_knowledge_file(name: str, filename: str):
 
 @router.post("/{name}/knowledge", response_model=KnowledgeFileContent)
 async def upload_knowledge_file(name: str, file: KnowledgeFileUpload):
-    """Upload a knowledge file to a project."""
+    """
+    Save an uploaded knowledge file into the project's knowledge directory.
+    
+    Parameters:
+        name (str): Project name used to locate the project directory.
+        file (KnowledgeFileUpload): Uploaded file payload. Expected fields:
+            - filename: target filename to write under the project's knowledge directory.
+            - content: UTF-8 text content to write to the file.
+    
+    Returns:
+        KnowledgeFileContent: The written file's `filename` and `content`.
+    
+    Raises:
+        HTTPException: 404 if the project is not registered or its directory is missing.
+        HTTPException: 500 if writing the file fails.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 
@@ -736,7 +865,19 @@ async def upload_knowledge_file(name: str, file: KnowledgeFileUpload):
 
 @router.delete("/{name}/knowledge/{filename}")
 async def delete_knowledge_file(name: str, filename: str):
-    """Delete a knowledge file from a project."""
+    """
+    Remove a markdown knowledge file from the specified project.
+    
+    Parameters:
+        name (str): Registered project name.
+        filename (str): Name of the markdown file to delete (must match pattern `^[a-zA-Z0-9_\-\.]+\.md$`).
+    
+    Returns:
+        dict: {"success": True, "message": "<info>"} on successful deletion.
+    
+    Raises:
+        HTTPException: 400 if `filename` is invalid; 404 if the project or file is not found; 500 if deletion fails.
+    """
     _init_imports()
     _, _, get_project_path, _, _ = _get_registry_functions()
 

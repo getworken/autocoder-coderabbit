@@ -46,7 +46,12 @@ from typing import Annotated
 
 
 def _utc_now() -> datetime:
-    """Return current UTC time."""
+    """
+    Get the current timezone-aware UTC datetime.
+    
+    Returns:
+        utc_now (datetime): A timezone-aware datetime set to UTC.
+    """
     return datetime.now(timezone.utc)
 
 from mcp.server.fastmcp import FastMCP
@@ -114,7 +119,14 @@ _claim_lock = threading.Lock()
 
 @asynccontextmanager
 async def server_lifespan(server: FastMCP):
-    """Initialize database on startup, cleanup on shutdown."""
+    """
+    Set up application resources for the server lifespan: prepare project directory, initialize the database engine and session maker, and run migrations on startup; dispose the engine on shutdown.
+    
+    Side effects:
+    - Creates PROJECT_DIR if missing.
+    - Sets module-level `_engine` and `_session_maker`.
+    - Runs migration to convert legacy data if required.
+    """
     global _session_maker, _engine
 
     # Create project directory if it doesn't exist
@@ -243,20 +255,18 @@ def feature_mark_passing(
     feature_id: Annotated[int, Field(description="The ID of the feature to mark as passing", ge=1)],
     quality_result: Annotated[dict | None, Field(description="Optional quality gate results to store as test evidence", default=None)] = None
 ) -> str:
-    """Mark a feature as passing after successful implementation.
-
-    Updates the feature's passes field to true and clears the in_progress flag.
-    Use this after you have implemented the feature and verified it works correctly.
-
-    Optionally stores quality gate results (lint, type-check, test outputs) as
-    test evidence for compliance and debugging purposes.
-
-    Args:
-        feature_id: The ID of the feature to mark as passing
-        quality_result: Optional dict with quality gate results (lint, type-check, etc.)
-
+    """
+    Mark the feature as passing and optionally record quality-gate evidence.
+    
+    Sets the feature's pass state, clears the in-progress flag and last error, and records completion time. If provided, stores `quality_result` on the feature. Commits the change and returns a JSON-encoded response.
+    
+    Parameters:
+        feature_id (int): ID of the feature to mark as passing.
+        quality_result (dict | None): Optional quality gate results (lint, test outputs, etc.) to store as test evidence.
+    
     Returns:
-        JSON with success confirmation: {success, feature_id, name}
+        str: JSON string. On success: {"success": True, "feature_id": <id>, "name": "<feature name>"}.
+             On failure or missing feature: {"error": "<message>"}.
     """
     session = get_session()
     try:
@@ -289,24 +299,16 @@ def feature_mark_failing(
     feature_id: Annotated[int, Field(description="The ID of the feature to mark as failing", ge=1)],
     error_message: Annotated[str | None, Field(description="Optional error message describing why the feature failed", default=None)] = None
 ) -> str:
-    """Mark a feature as failing after finding a regression.
-
-    Updates the feature's passes field to false and clears the in_progress flag.
-    Use this when a testing agent discovers that a previously-passing feature
-    no longer works correctly (regression detected).
-
-    After marking as failing, you should:
-    1. Investigate the root cause
-    2. Fix the regression
-    3. Verify the fix
-    4. Call feature_mark_passing once fixed
-
-    Args:
-        feature_id: The ID of the feature to mark as failing
-        error_message: Optional message describing the failure (e.g., test output, stack trace)
-
+    """
+    Mark a feature as failed due to a detected regression.
+    
+    Sets the feature's pass state to false, clears any in-progress claim, records the failure time, and optionally stores a failure message.
+    
+    Parameters:
+        error_message (str | None): Optional failure description to store on the feature; if provided, it is truncated to 10,240 characters.
+    
     Returns:
-        JSON with the updated feature details, or error if not found.
+        str: JSON string containing success information with `feature_id` and `name` on success, or an `{"error": ...}` object on failure.
     """
     session = get_session()
     try:
@@ -344,20 +346,18 @@ def feature_mark_failing(
 def feature_get_for_regression(
     limit: Annotated[int, Field(default=3, ge=1, le=10, description="Maximum number of passing features to return")] = 3
 ) -> str:
-    """Get passing features for regression testing, prioritizing least-tested features.
-
-    Returns features that are currently passing, ordered by regression_count (ascending)
-    so that features tested fewer times are prioritized. This ensures even distribution
-    of regression testing across all features, avoiding duplicate testing of the same
-    features while others are never tested.
-
-    Each returned feature has its regression_count incremented to track testing frequency.
-
-    Args:
-        limit: Maximum number of features to return (1-10, default 3)
-
+    """
+    Select passing features for regression testing, prioritizing those with the lowest regression counts.
+    
+    Returns up to `limit` features that currently pass and increments each feature's `regression_count` to record that it was selected for regression testing.
+    
+    Parameters:
+        limit (int): Maximum number of features to return (1-10, default 3).
+    
     Returns:
-        JSON with list of features for regression testing.
+        str: JSON string with keys:
+            - "features": list of feature dictionaries selected for regression testing.
+            - "count": integer number of features returned.
     """
     session = get_session()
     try:
@@ -399,28 +399,19 @@ def feature_get_for_regression(
 def feature_skip(
     feature_id: Annotated[int, Field(description="The ID of the feature to skip", ge=1)]
 ) -> str:
-    """Skip a feature by moving it to the end of the priority queue.
-
-    Use this ONLY for truly external blockers you cannot control:
-    - External API credentials not configured (e.g., Stripe keys, OAuth secrets)
-    - External service unavailable or inaccessible
-    - Hardware/environment limitations you cannot fulfill
-
-    DO NOT skip for:
-    - Missing functionality (build it yourself)
-    - Refactoring features (implement them like any other feature)
-    - "Unclear requirements" (interpret the intent and implement)
-    - Dependencies on other features (build those first)
-
-    The feature's priority is set to max_priority + 1, so it will be
-    worked on after all other pending features. Also clears the in_progress
-    flag so the feature returns to "pending" status.
-
-    Args:
-        feature_id: The ID of the feature to skip
-
+    """
+    Move a feature to the end of the priority queue and clear its in-progress state.
+    
+    Sets the feature's priority to the current maximum priority plus one and sets
+    its `in_progress` flag to False so it returns to pending status.
+    
+    Parameters:
+        feature_id (int): ID of the feature to move; must be >= 1.
+    
     Returns:
-        JSON with skip details: id, name, old_priority, new_priority, message
+        str: JSON object with either skip details or an error.
+             On success: { "id", "name", "old_priority", "new_priority", "message" }.
+             On failure: { "error": "<description>" }.
     """
     session = get_session()
     try:
@@ -464,19 +455,16 @@ def feature_skip(
 def feature_mark_in_progress(
     feature_id: Annotated[int, Field(description="The ID of the feature to mark as in-progress", ge=1)]
 ) -> str:
-    """Mark a feature as in-progress.
-
-    This prevents other agent sessions from working on the same feature.
-    Call this after getting your assigned feature details with feature_get_by_id.
-
-    Uses atomic locking to prevent race conditions when multiple agents
-    try to claim the same feature simultaneously.
-
-    Args:
-        feature_id: The ID of the feature to mark as in-progress
-
+    """
+    Reserve a feature for work by marking it in-progress.
+    
+    Sets the feature's `in_progress` flag to `True` and records `started_at`. If the feature does not exist, is already passing, or is already in-progress, an error response is returned.
+    
+    Parameters:
+        feature_id (int): The ID of the feature to mark as in-progress.
+    
     Returns:
-        JSON with the updated feature details, or error if not found or already in-progress.
+        str: JSON string containing the updated feature object on success, or an error object with an `error` message on failure.
     """
     # Use lock to prevent race condition when multiple agents try to claim simultaneously
     with _claim_lock:
@@ -510,19 +498,16 @@ def feature_mark_in_progress(
 def feature_claim_and_get(
     feature_id: Annotated[int, Field(description="The ID of the feature to claim", ge=1)]
 ) -> str:
-    """Atomically claim a feature (mark in-progress) and return its full details.
-
-    Combines feature_mark_in_progress + feature_get_by_id into a single operation.
-    If already in-progress, still returns the feature details (idempotent).
-
-    Uses atomic locking to prevent race conditions when multiple agents
-    try to claim the same feature simultaneously.
-
-    Args:
-        feature_id: The ID of the feature to claim and retrieve
-
+    """
+    Atomically claims a feature (marks it in-progress) and returns the feature's full details.
+    
+    If the feature is already in-progress the operation is idempotent and returns the feature details with an `already_claimed` flag. Will return an error if the feature does not exist or is already marked passing.
+    
+    Parameters:
+        feature_id (int): The ID of the feature to claim.
+    
     Returns:
-        JSON with feature details including claimed status, or error if not found.
+        str: JSON-encoded object containing the feature details with an `already_claimed` boolean, or an error object with an `error` key describing the failure.
     """
     # Use lock to ensure atomic claim operation across multiple processes
     with _claim_lock:
@@ -558,16 +543,11 @@ def feature_claim_and_get(
 def feature_clear_in_progress(
     feature_id: Annotated[int, Field(description="The ID of the feature to clear in-progress status", ge=1)]
 ) -> str:
-    """Clear in-progress status from a feature.
-
-    Use this when abandoning a feature or manually unsticking a stuck feature.
-    The feature will return to the pending queue.
-
-    Args:
-        feature_id: The ID of the feature to clear in-progress status
-
+    """
+    Clear the in-progress flag on the specified feature and return its updated representation.
+    
     Returns:
-        JSON with the updated feature details, or error if not found.
+        JSON string containing the updated feature dictionary on success, or an error object with an "error" key if the feature is not found or the operation fails.
     """
     session = get_session()
     try:
@@ -593,16 +573,15 @@ def feature_release_testing(
     feature_id: Annotated[int, Field(ge=1, description="Feature ID to release testing claim")],
     tested_ok: Annotated[bool, Field(description="True if feature passed, False if regression found")]
 ) -> str:
-    """Release a testing claim on a feature.
-
-    Testing agents MUST call this when done, regardless of outcome.
-
-    Args:
-        feature_id: The ID of the feature to release
-        tested_ok: True if the feature still passes, False if a regression was found
-
+    """
+    Release a testing claim for a feature and record whether it passed or regressed.
+    
+    Parameters:
+        feature_id (int): ID of the feature to release.
+        tested_ok (bool): True if the feature passed testing, False if a regression was detected.
+    
     Returns:
-        JSON with: success, feature_id, tested_ok, message
+        str: JSON string containing either a success object with keys `success`, `feature_id`, `tested_ok`, and `message`, or an error object with an `error` key.
     """
     session = get_session()
     try:
@@ -752,19 +731,17 @@ def feature_create(
     description: Annotated[str, Field(min_length=1, description="Detailed description of the feature")],
     steps: Annotated[list[str], Field(min_length=1, description="List of implementation/verification steps")]
 ) -> str:
-    """Create a single feature in the project backlog.
-
-    Use this when the user asks to add a new feature, capability, or test case.
-    The feature will be added with the next available priority number.
-
-    Args:
-        category: Feature category for grouping (e.g., 'Authentication', 'API', 'UI')
-        name: Descriptive name for the feature
-        description: Detailed description of what this feature should do
-        steps: List of steps to implement or verify the feature
-
+    """
+    Create a new feature in the project backlog and assign it the next available priority.
+    
+    Parameters:
+        category (str): Feature category for grouping (e.g., "Authentication", "API", "UI").
+        name (str): Descriptive name for the feature.
+        description (str): Detailed description of the feature.
+        steps (list[str]): Ordered list of implementation or verification steps.
+    
     Returns:
-        JSON with the created feature details including its ID
+        str: JSON string containing the created feature details on success (includes `success`, `message`, and a `feature` object with assigned `id` and `priority`), or an error object with an `error` key on failure.
     """
     session = get_session()
     try:
@@ -808,22 +785,20 @@ def feature_update(
     description: Annotated[str | None, Field(default=None, min_length=1, description="New description (optional)")] = None,
     steps: Annotated[list[str] | None, Field(default=None, min_length=1, description="New steps list (optional)")] = None,
 ) -> str:
-    """Update an existing feature's editable fields.
-
-    Use this when the user asks to modify, update, edit, or change a feature.
-    Only the provided fields will be updated; others remain unchanged.
-
-    Cannot update: id, priority (use feature_skip), passes, in_progress (agent-controlled)
-
-    Args:
-        feature_id: The ID of the feature to update
-        category: New category (optional)
-        name: New name (optional)
-        description: New description (optional)
-        steps: New steps list (optional)
-
+    """
+    Update editable fields of an existing feature.
+    
+    Only the provided fields are changed; id, priority, passes, and in_progress cannot be modified. At least one of `category`, `name`, `description`, or `steps` must be provided.
+    
+    Parameters:
+        feature_id (int): ID of the feature to update.
+        category (str | None): New category (optional).
+        name (str | None): New name (optional).
+        description (str | None): New description (optional).
+        steps (list[str] | None): New ordered list of steps (optional).
+    
     Returns:
-        JSON with the updated feature details, or error if not found.
+        str: JSON string containing the updated feature under `"feature"` on success, or an `{"error": ...}` object on failure.
     """
     session = get_session()
     try:
@@ -870,17 +845,19 @@ def feature_add_dependency(
     feature_id: Annotated[int, Field(ge=1, description="Feature to add dependency to")],
     dependency_id: Annotated[int, Field(ge=1, description="ID of the dependency feature")]
 ) -> str:
-    """Add a dependency relationship between features.
-
-    The dependency_id feature must be completed before feature_id can be started.
-    Validates: self-reference, existence, circular dependencies, max limit.
-
-    Args:
-        feature_id: The ID of the feature that will depend on another feature
-        dependency_id: The ID of the feature that must be completed first
-
+    """
+    Add a dependency edge indicating that one feature must complete before another can start.
+    
+    Validates that both features exist, prevents a feature from depending on itself, enforces the maximum dependencies limit, and rejects changes that would create a circular dependency.
+    
+    Parameters:
+        feature_id (int): ID of the feature that will depend on another feature.
+        dependency_id (int): ID of the feature that must be completed first.
+    
     Returns:
-        JSON with success status and updated dependencies list, or error message
+        str: JSON string containing either:
+            - on success: {"success": True, "feature_id": <int>, "dependencies": [<int>, ...]}
+            - on error: {"error": "<description>"}
     """
     session = get_session()
     try:
@@ -935,14 +912,12 @@ def feature_remove_dependency(
     feature_id: Annotated[int, Field(ge=1, description="Feature to remove dependency from")],
     dependency_id: Annotated[int, Field(ge=1, description="ID of dependency to remove")]
 ) -> str:
-    """Remove a dependency from a feature.
-
-    Args:
-        feature_id: The ID of the feature to remove a dependency from
-        dependency_id: The ID of the dependency to remove
-
+    """
+    Remove a dependency edge from a feature's dependency list.
+    
     Returns:
-        JSON with success status and updated dependencies list, or error message
+        A JSON string. On success: `{"success": True, "feature_id": <id>, "dependencies": [<dep_ids>]}`.
+        On error: `{"error": "<message>"}` (e.g., feature not found, dependency not present, or failure).
     """
     session = get_session()
     try:
@@ -974,19 +949,18 @@ def feature_remove_dependency(
 def feature_delete(
     feature_id: Annotated[int, Field(description="The ID of the feature to delete", ge=1)]
 ) -> str:
-    """Delete a feature from the backlog.
-
-    Use this when the user asks to remove, delete, or drop a feature.
-    This removes the feature from tracking only - any implemented code remains.
-
-    For completed features, consider suggesting the user create a new "removal"
-    feature if they also want the code removed.
-
-    Args:
-        feature_id: The ID of the feature to delete
-
+    """
+    Delete a feature and remove any dependency references to it from other features.
+    
+    Removes the feature record from the backlog. If other features listed this feature in their dependencies, those references are removed (dependency list set to None if empty) before deletion.
+    
+    Parameters:
+        feature_id (int): The ID of the feature to delete.
+    
     Returns:
-        JSON with success message and deleted feature details, or error if not found.
+        str: JSON string containing either:
+            - On success: an object with "success": true, "deleted_feature" (the deleted feature's data), "message", and optionally "updated_dependents" (list of {id, name} for features that had the dependency removed).
+            - On error: an object with an "error" key describing the failure.
     """
     session = get_session()
     try:
@@ -1042,16 +1016,19 @@ def feature_delete(
 def feature_get_ready(
     limit: Annotated[int, Field(default=10, ge=1, le=50, description="Max features to return")] = 10
 ) -> str:
-    """Get all features ready to start (dependencies satisfied, not in progress).
-
-    Useful for parallel execution - returns multiple features that can run simultaneously.
-    A feature is ready if it is not passing, not in progress, and all dependencies are passing.
-
-    Args:
-        limit: Maximum number of features to return (1-50, default 10)
-
+    """
+    Return features that are ready to start (dependencies satisfied and not in progress).
+    
+    A feature is ready if it is not passing, not marked in progress, and every feature it depends on is passing.
+    
+    Parameters:
+        limit (int): Maximum number of features to include in the returned list (1–50).
+    
     Returns:
-        JSON with: features (list), count (int), total_ready (int)
+        JSON string with keys:
+            - `features`: list of feature dictionaries ready to start.
+            - `count`: number of features returned (<= `limit`).
+            - `total_ready`: total number of ready features available.
     """
     session = get_session()
     try:
@@ -1189,16 +1166,17 @@ def feature_set_dependencies(
     feature_id: Annotated[int, Field(ge=1, description="Feature to set dependencies for")],
     dependency_ids: Annotated[list[int], Field(description="List of dependency feature IDs")]
 ) -> str:
-    """Set all dependencies for a feature at once, replacing any existing dependencies.
-
-    Validates: self-reference, existence of all dependencies, circular dependencies, max limit.
-
-    Args:
-        feature_id: The ID of the feature to set dependencies for
-        dependency_ids: List of feature IDs that must be completed first
-
+    """
+    Replace a feature's dependency list with the provided feature IDs.
+    
+    Validates that the feature exists, that no self-reference, duplicates, or more than the allowed maximum dependencies are present, that every dependency ID exists, and that updating the dependencies will not create a circular dependency. On success, persists the new dependency list (or clears it) and returns the updated dependencies.
+    
+    Parameters:
+        feature_id (int): ID of the feature whose dependencies will be replaced.
+        dependency_ids (list[int]): List of feature IDs that this feature should depend on (order will be stored sorted). Use an empty list to clear dependencies.
+    
     Returns:
-        JSON with success status and updated dependencies list, or error message
+        str: JSON object. On success: {"success": True, "feature_id": <id>, "dependencies": [<ids>]}. On failure: {"error": "<message>"}.
     """
     session = get_session()
     try:
@@ -1262,19 +1240,19 @@ def feature_start_attempt(
     agent_id: Annotated[str | None, Field(description="Optional unique agent identifier", default=None)] = None,
     agent_index: Annotated[int | None, Field(description="Optional agent index for parallel runs", default=None)] = None
 ) -> str:
-    """Start tracking an agent's attempt on a feature.
-
-    Creates a new FeatureAttempt record to track which agent is working on
-    which feature, with timing and outcome tracking.
-
-    Args:
-        feature_id: The ID of the feature being worked on
-        agent_type: Type of agent ("initializer", "coding", "testing")
-        agent_id: Optional unique identifier for the agent
-        agent_index: Optional index for parallel agent runs (0, 1, 2, etc.)
-
+    """
+    Create and record a new agent attempt for a feature.
+    
+    Validates the feature exists and the agent_type, then inserts a FeatureAttempt with outcome set to "in_progress" and a started timestamp.
+    
+    Parameters:
+        feature_id (int): Feature ID to start the attempt for.
+        agent_type (str): Agent type; one of "initializer", "coding", or "testing".
+        agent_id (str | None): Optional unique agent identifier.
+        agent_index (int | None): Optional agent index for parallel runs.
+    
     Returns:
-        JSON with the created attempt ID and details
+        str: JSON string containing the created attempt information on success (includes `attempt_id`, `feature_id`, `agent_type`, and `started_at`) or an `error` object on failure.
     """
     session = get_session()
     try:
@@ -1321,17 +1299,16 @@ def feature_end_attempt(
     outcome: Annotated[str, Field(description="Outcome: 'success', 'failure', or 'abandoned'")],
     error_message: Annotated[str | None, Field(description="Optional error message for failures", default=None)] = None
 ) -> str:
-    """End tracking an agent's attempt on a feature.
-
-    Updates the FeatureAttempt record with the final outcome and timing.
-
-    Args:
-        attempt_id: The ID of the attempt to end
-        outcome: Final outcome ("success", "failure", "abandoned")
-        error_message: Optional error message for failure cases
-
+    """
+    End a feature attempt by recording its end time and final outcome.
+    
+    Parameters:
+        attempt_id (int): ID of the attempt to finish.
+        outcome (str): One of 'success', 'failure', or 'abandoned'.
+        error_message (str | None): Optional error message to record (stored truncated to 10240 characters).
+    
     Returns:
-        JSON with the updated attempt details including duration
+        result (str): JSON object containing the updated attempt under "attempt" and "duration_seconds" on success, or an "error" key on failure.
     """
     session = get_session()
     try:
@@ -1371,17 +1348,14 @@ def feature_get_attempts(
     feature_id: Annotated[int, Field(ge=1, description="Feature ID to get attempts for")],
     limit: Annotated[int, Field(default=10, ge=1, le=100, description="Max attempts to return")] = 10
 ) -> str:
-    """Get attempt history for a feature.
-
-    Returns all attempts made on a feature, ordered by most recent first.
-    Useful for debugging and understanding which agents worked on a feature.
-
-    Args:
-        feature_id: The ID of the feature
-        limit: Maximum number of attempts to return (1-100, default 10)
-
+    """
+    Retrieve recent attempt records and summary statistics for a feature.
+    
     Returns:
-        JSON with list of attempts and statistics
+        JSON string containing:
+          - `feature_id` (int) and `feature_name` (str)
+          - `attempts` (list): attempt objects ordered by most recent first
+          - `statistics` (dict): `total_attempts`, `success_count`, `failure_count`, and `abandoned_count`
     """
     session = get_session()
     try:
@@ -1435,22 +1409,16 @@ def feature_log_error(
     agent_id: Annotated[str | None, Field(description="Optional agent ID", default=None)] = None,
     attempt_id: Annotated[int | None, Field(description="Optional attempt ID to link this error to", default=None)] = None
 ) -> str:
-    """Log an error for a feature.
-
-    Creates a new error record to track issues encountered while working on a feature.
-    This maintains a full history of all errors for debugging and analysis.
-
-    Args:
-        feature_id: The ID of the feature
-        error_type: Type of error (test_failure, lint_error, runtime_error, timeout, other)
-        error_message: Description of the error
-        stack_trace: Optional full stack trace
-        agent_type: Optional type of agent that encountered the error
-        agent_id: Optional identifier of the agent
-        attempt_id: Optional attempt ID to associate this error with
-
+    """
+    Record an error for a feature, create a FeatureError entry, and update the feature's last_error and last_failed_at fields.
+    
+    Parameters:
+        error_type (str): One of "test_failure", "lint_error", "runtime_error", "timeout", or "other".
+        error_message (str): Description of the error; stored truncated to 10240 characters if longer.
+        stack_trace (str | None): Optional stack trace; stored truncated to 50000 characters if longer.
+    
     Returns:
-        JSON with the created error ID and details
+        str: JSON string. On success: {"success": True, "error_id": <int>, "feature_id": <int>, "error_type": <str>, "occurred_at": <ISO 8601 timestamp>}. On failure: {"error": "<message>"}.
     """
     session = get_session()
     try:
@@ -1575,16 +1543,17 @@ def feature_resolve_error(
     error_id: Annotated[int, Field(ge=1, description="Error ID to resolve")],
     resolution_notes: Annotated[str | None, Field(description="Optional notes about how the error was resolved", default=None)] = None
 ) -> str:
-    """Mark an error as resolved.
-
-    Updates an error record to indicate it has been fixed or addressed.
-
-    Args:
-        error_id: The ID of the error to resolve
-        resolution_notes: Optional notes about the resolution
-
+    """
+    Mark a FeatureError as resolved and record optional resolution notes.
+    
+    If the error exists and is not already resolved, sets it as resolved, records the resolution time, stores up to 5000 characters of resolution notes, and returns the updated error data. If the error is missing or already resolved, returns an error object.
+    
+    Parameters:
+        error_id (int): ID of the error to resolve.
+        resolution_notes (str | None): Optional notes describing how the error was resolved; truncated to 5000 characters if longer.
+    
     Returns:
-        JSON with the updated error details
+        str: JSON object with "success": True and the updated error under "error", or a JSON error object with an "error" key.
     """
     session = get_session()
     try:

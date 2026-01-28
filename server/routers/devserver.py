@@ -50,16 +50,16 @@ router = APIRouter(prefix="/api/projects/{project_name}/devserver", tags=["devse
 
 def get_project_dir(project_name: str) -> Path:
     """
-    Get the validated project directory for a project name.
-
-    Args:
-        project_name: Name of the project
-
+    Locate and validate the on-disk directory for a project.
+    
+    Parameters:
+        project_name (str): Project identifier to validate and look up.
+    
     Returns:
-        Path to the project directory
-
+        Path: Path to the project's directory.
+    
     Raises:
-        HTTPException: If project is not found or directory does not exist
+        HTTPException: 404 if the project is not registered or the directory does not exist.
     """
     project_name = validate_project_name(project_name)
     project_dir = _get_project_path(project_name)

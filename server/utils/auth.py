@@ -28,14 +28,26 @@ from fastapi import WebSocket
 
 
 def is_basic_auth_enabled() -> bool:
-    """Check if Basic Auth is enabled via environment variables."""
+    """
+    Determine whether HTTP Basic Authentication is configured via environment variables.
+    
+    Returns:
+        bool: `True` if both `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD` environment variables are set to non-empty values after stripping whitespace, `False` otherwise.
+    """
     username = os.environ.get("BASIC_AUTH_USERNAME", "").strip()
     password = os.environ.get("BASIC_AUTH_PASSWORD", "").strip()
     return bool(username and password)
 
 
 def get_basic_auth_credentials() -> tuple[str, str]:
-    """Get configured Basic Auth credentials."""
+    """
+    Read the configured Basic Auth username and password from environment variables.
+    
+    Returns:
+        A tuple (username, password) where each value is the corresponding environment
+        variable trimmed of surrounding whitespace; if a variable is not set, its value
+        is an empty string.
+    """
     username = os.environ.get("BASIC_AUTH_USERNAME", "").strip()
     password = os.environ.get("BASIC_AUTH_PASSWORD", "").strip()
     return username, password
@@ -43,14 +55,12 @@ def get_basic_auth_credentials() -> tuple[str, str]:
 
 def verify_basic_auth(username: str, password: str) -> bool:
     """
-    Verify Basic Auth credentials using constant-time comparison.
-
-    Args:
-        username: Provided username
-        password: Provided password
-
+    Validate provided Basic Auth credentials against the configured username and password.
+    
+    Comparison is performed in constant time to mitigate timing attacks. If no configured username or password is set, authentication is considered disabled and the function returns True.
+    
     Returns:
-        True if credentials match configured values, False otherwise.
+        True if both the provided username and password match the configured credentials, False otherwise.
     """
     expected_user, expected_pass = get_basic_auth_credentials()
     if not expected_user or not expected_pass:
@@ -63,17 +73,15 @@ def verify_basic_auth(username: str, password: str) -> bool:
 
 def check_websocket_auth(websocket: WebSocket) -> bool:
     """
-    Check WebSocket authentication using Basic Auth credentials.
-
-    For WebSockets, auth can be passed via:
-    1. Authorization header (for clients that support it)
-    2. Query parameter ?token=base64(user:pass) (for browser WebSockets)
-
-    Args:
-        websocket: The WebSocket connection to check
-
+    Validate a WebSocket connection against configured HTTP Basic credentials.
+    
+    If no Basic Auth credentials are configured, the connection is allowed. Authentication is accepted either via an Authorization header of the form "Basic <base64(user:pass)>" or via a query parameter "token" containing base64("user:pass").
+    
+    Parameters:
+        websocket: WebSocket-like object with `headers` and `query_params` mappings used to read the Authorization header and the `token` query parameter.
+    
     Returns:
-        True if auth is valid or not required, False otherwise.
+        `True` if authentication succeeds or is not required, `False` otherwise.
     """
     # If Basic Auth not configured, allow all connections
     if not is_basic_auth_enabled():
@@ -108,13 +116,13 @@ def check_websocket_auth(websocket: WebSocket) -> bool:
 
 async def reject_unauthenticated_websocket(websocket: WebSocket) -> bool:
     """
-    Check WebSocket auth and close connection if unauthorized.
-
-    Args:
-        websocket: The WebSocket connection
-
+    Validate a WebSocket's Basic Authentication and close the connection if authentication fails.
+    
+    Parameters:
+        websocket (WebSocket): The WebSocket connection to validate; will be closed with code 4001 and reason "Authentication required" if authentication fails.
+    
     Returns:
-        True if connection should proceed, False if it was closed due to auth failure.
+        bool: `True` if the connection is authenticated and may proceed, `False` if the connection was closed due to failed authentication.
     """
     if not check_websocket_auth(websocket):
         await websocket.close(code=4001, reason="Authentication required")

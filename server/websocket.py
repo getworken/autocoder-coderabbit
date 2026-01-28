@@ -90,6 +90,16 @@ class AgentTracker:
 
     def __init__(self):
         # (feature_id, agent_type) -> {name, state, last_thought, agent_index, agent_type, last_activity}
+        """
+        Initialize the AgentTracker's internal state and concurrency primitives.
+        
+        Creates:
+        - active_agents: mapping from (feature_id, agent_type) to agent metadata dict with keys
+          `name`, `state`, `last_thought`, `agent_index`, `agent_type`, and `last_activity`.
+        - _next_agent_index: counter used to assign incremental agent indices.
+        - _lock: asyncio.Lock protecting concurrent access to tracker state.
+        - _last_cleanup: timestamp of the last TTL cleanup run.
+        """
         self.active_agents: dict[tuple[int, str], dict] = {}
         self._next_agent_index = 0
         self._lock = asyncio.Lock()
@@ -97,9 +107,19 @@ class AgentTracker:
 
     async def process_line(self, line: str) -> dict | None:
         """
-        Process an output line and return an agent_update message if relevant.
-
-        Returns None if no update should be emitted.
+        Parse an agent or orchestrator output line and produce an agent_update payload when the line indicates a change in agent lifecycle, state, or thought.
+        
+        Returns:
+            dict | None: An agent_update dictionary when an update should be emitted, otherwise `None`. When returned, the dictionary contains:
+                - type (str): fixed value "agent_update".
+                - agentIndex (int): numeric index assigned to the agent.
+                - agentName (str): display name (mascot) for the agent.
+                - agentType (str): "coding" or "testing".
+                - featureId (int): feature identifier parsed from the line.
+                - featureName (str): human-readable feature name, e.g., "Feature #3".
+                - state (str): agent state (e.g., "thinking", "working", "completed", "failed").
+                - thought (str | None): brief extracted thought or message excerpt when available.
+                - timestamp (str): ISO 8601 timestamp of the update.
         """
         # Check for orchestrator status messages first
         # These don't have [Feature #X] prefix
@@ -212,16 +232,17 @@ class AgentTracker:
         return None
 
     async def get_agent_info(self, feature_id: int, agent_type: str = "coding") -> tuple[int | None, str | None]:
-        """Get agent index and name for a feature ID and agent type.
-
-        Thread-safe method that acquires the lock before reading state.
-
-        Args:
-            feature_id: The feature ID to look up.
-            agent_type: The agent type ("coding" or "testing"). Defaults to "coding".
-
+        """
+        Return the tracked agent's index and display name for a given feature and agent type.
+        
+        This method acquires the tracker's lock before reading state.
+        
+        Parameters:
+        	feature_id (int): Feature identifier to query.
+        	agent_type (str): Agent role to look up, e.g. "coding" or "testing". Defaults to "coding".
+        
         Returns:
-            Tuple of (agentIndex, agentName) or (None, None) if not tracked.
+        	tuple[int | None, str | None]: (agentIndex, agentName) or (None, None) if the agent is not tracked.
         """
         async with self._lock:
             key = (feature_id, agent_type)
@@ -231,12 +252,10 @@ class AgentTracker:
             return None, None
 
     async def reset(self):
-        """Reset tracker state when orchestrator stops or crashes.
-
-        Clears all active agents and resets the index counter to prevent
-        ghost agents accumulating across start/stop cycles.
-
-        Must be called with await since it acquires the async lock.
+        """
+        Reset the tracker's state when the orchestrator stops or crashes.
+        
+        Clears all tracked agents, resets the agent index counter, and updates the last-cleanup timestamp.
         """
         async with self._lock:
             self.active_agents.clear()
@@ -244,10 +263,13 @@ class AgentTracker:
             self._last_cleanup = datetime.now()
 
     async def cleanup_stale_agents(self) -> int:
-        """Remove agents that haven't had activity within the TTL.
-
-        Returns the number of agents removed. This method should be called
-        periodically to prevent memory leaks from crashed agents.
+        """
+        Remove tracked agents whose last activity exceeds AGENT_TTL_SECONDS.
+        
+        Removes matching entries from self.active_agents and updates the tracker's _last_cleanup timestamp.
+        
+        Returns:
+            int: Number of agents removed.
         """
         async with self._lock:
             now = datetime.now()
@@ -268,17 +290,45 @@ class AgentTracker:
             return len(stale_keys)
 
     def _should_cleanup(self) -> bool:
-        """Check if it's time for periodic cleanup."""
+        """
+        Determine whether enough time has elapsed to trigger the periodic cleanup.
+        
+        Returns:
+            `true` if more than five minutes (300 seconds) have passed since the last cleanup, `false` otherwise.
+        """
         # Cleanup every 5 minutes
         return (datetime.now() - self._last_cleanup).total_seconds() > 300
 
     def _schedule_cleanup(self) -> None:
-        """Schedule cleanup if needed (non-blocking)."""
+        """
+        Schedule a background cleanup of stale agent entries when the cleanup interval has elapsed.
+        
+        This method triggers a non-blocking background task to remove agents whose last activity exceeds the configured TTL; if a cleanup is not currently due, it returns without action.
+        """
         if self._should_cleanup():
             asyncio.create_task(self.cleanup_stale_agents())
 
     async def _handle_agent_start(self, feature_id: int, line: str, agent_type: str = "coding") -> dict | None:
-        """Handle agent start message from orchestrator."""
+        """
+        Create a new agent tracking entry for the given feature and produce an `agent_update` payload for the UI.
+        
+        Parameters:
+            feature_id (int): Numeric feature identifier extracted from orchestrator output.
+            line (str): Orchestrator log line; used to extract a human-readable feature name if present.
+            agent_type (str): Type of agent being started (e.g., "coding" or "testing").
+        
+        Returns:
+            dict: An `agent_update` dictionary containing keys:
+                - `type`: `"agent_update"`
+                - `agentIndex`: assigned numeric index for the agent
+                - `agentName`: display name (mascot) for the agent
+                - `agentType`: the provided `agent_type`
+                - `featureId`: the provided `feature_id`
+                - `featureName`: extracted or default feature name
+                - `state`: initial state (`"thinking"`)
+                - `thought`: initial thought message (`"Starting work..."`)
+                - `timestamp`: ISO 8601 timestamp of the event
+        """
         async with self._lock:
             key = (feature_id, agent_type)  # Composite key for separate tracking
             agent_index = self._next_agent_index
@@ -627,7 +677,27 @@ ROOT_DIR = Path(__file__).parent.parent
 
 
 async def poll_progress(websocket: WebSocket, project_name: str, project_dir: Path):
-    """Poll database for progress changes and send updates."""
+    """
+    Continuously poll test progress for the given project and send progress updates over the websocket.
+    
+    Sends a JSON message whenever the number of passing, in-progress, or total tests changes. Messages are sent every 2 seconds at most and have the shape:
+    {
+      "type": "progress",
+      "passing": int,
+      "in_progress": int,
+      "total": int,
+      "percentage": float  # rounded to one decimal place
+    }
+    
+    Parameters:
+        websocket (WebSocket): WebSocket to send progress messages to.
+        project_dir (Path): Filesystem path of the project used to compute test progress.
+    
+    Raises:
+        asyncio.CancelledError: Propagates cancellation to allow cooperative shutdown.
+    Notes:
+        On unexpected errors the function logs a warning and exits the polling loop.
+    """
     count_passing_tests = _get_count_passing_tests()
     last_passing = -1
     last_in_progress = -1
@@ -662,12 +732,13 @@ async def poll_progress(websocket: WebSocket, project_name: str, project_dir: Pa
 
 async def project_websocket(websocket: WebSocket, project_name: str):
     """
-    WebSocket endpoint for project updates.
-
-    Streams:
-    - Progress updates (passing/total counts)
-    - Agent status changes
-    - Agent stdout/stderr lines
+    Provide a WebSocket endpoint that streams real-time project updates to a connected client.
+    
+    Streams progress metrics for test suites, agent lifecycle events and stdout/stderr lines, orchestrator observability events, and dev server logs/status. Performs authentication and project-name validation, sends initial state (agent status, dev server status, progress), registers callbacks to forward agent/dev output and status changes, and keeps the connection open to handle simple client messages (e.g., ping). Cleans up callbacks and background polling when the connection closes.
+    
+    Parameters:
+        websocket (WebSocket): Open WebSocket connection for the client.
+        project_name (str): Project identifier; must be a valid project name present in the registry.
     """
     # Check authentication if Basic Auth is enabled
     if not await reject_unauthenticated_websocket(websocket):
@@ -698,7 +769,18 @@ async def project_websocket(websocket: WebSocket, project_name: str):
     orchestrator_tracker = OrchestratorTracker()
 
     async def on_output(line: str):
-        """Handle agent output - broadcast to this WebSocket."""
+        """
+        Process a single agent output line and broadcast resulting JSON messages to the connected WebSocket.
+        
+        Parameters:
+            line (str): A single stdout/stderr line from an agent or orchestrator.
+        
+        Description:
+            - Sends a `log` JSON message containing the raw line, an ISO timestamp, and optional `featureId` and `agentIndex` when the line can be attributed to a feature/agent.
+            - Forwards an `agent_update` JSON message when the AgentTracker produces one for the line.
+            - Forwards an `orchestrator_update` JSON message when the OrchestratorTracker produces one for the line.
+            - Handles client disconnects and connection errors without raising; unexpected exceptions are logged and do not propagate.
+        """
         try:
             # Extract feature ID from line if present
             feature_id = None
@@ -742,7 +824,12 @@ async def project_websocket(websocket: WebSocket, project_name: str):
             logger.warning(f"Unexpected error in on_output callback: {type(e).__name__}: {e}")
 
     async def on_status_change(status: str):
-        """Handle status change - broadcast to this WebSocket."""
+        """
+        Broadcast an agent status update to the connected WebSocket and reset trackers when the agent stops or crashes.
+        
+        Parameters:
+            status (str): Agent lifecycle status (e.g., "running", "stopped", "crashed"). If `status` is "stopped" or "crashed", the agent and orchestrator trackers are reset to clear any stale state.
+        """
         try:
             await websocket.send_json({
                 "type": "agent_status",
@@ -770,7 +857,11 @@ async def project_websocket(websocket: WebSocket, project_name: str):
     devserver_manager = get_devserver_manager(project_name, project_dir)
 
     async def on_dev_output(line: str):
-        """Handle dev server output - broadcast to this WebSocket."""
+        """
+        Broadcast a development-server log line to the connected WebSocket.
+        
+        This sends a JSON `dev_log` message containing the provided line and an ISO-8601 timestamp. If the client has disconnected, the function returns silently; connection errors are logged at debug level and other unexpected errors are logged as warnings.
+        """
         try:
             await websocket.send_json({
                 "type": "dev_log",
@@ -785,7 +876,12 @@ async def project_websocket(websocket: WebSocket, project_name: str):
             logger.warning(f"Unexpected error in on_dev_output callback: {type(e).__name__}: {e}")
 
     async def on_dev_status_change(status: str):
-        """Handle dev server status change - broadcast to this WebSocket."""
+        """
+        Notify the connected WebSocket of a dev server status update.
+        
+        Parameters:
+            status (str): Dev server status string to send to the client; included in the `dev_server_status` message payload along with the detected dev server URL.
+        """
         try:
             await websocket.send_json({
                 "type": "dev_server_status",

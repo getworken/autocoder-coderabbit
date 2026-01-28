@@ -63,14 +63,13 @@ def _is_ollama_mode() -> bool:
 
 @router.get("/models", response_model=ModelsResponse)
 async def get_available_models():
-    """Get list of available models.
-
-    Frontend should call this to get the current list of models
-    instead of hardcoding them.
-
-    Returns appropriate models based on the configured API mode:
-    - Ollama mode: Returns Ollama models (llama, codellama, etc.)
-    - Claude mode: Returns Claude models (opus, sonnet)
+    """
+    Return the available model list and the default model based on the configured API mode.
+    
+    Selects Ollama models and DEFAULT_OLLAMA_MODEL when Ollama mode is active; otherwise selects Claude models and DEFAULT_MODEL.
+    
+    Returns:
+        ModelsResponse: Object containing the list of available ModelInfo entries and the default model id.
     """
     if _is_ollama_mode():
         return ModelsResponse(
@@ -101,7 +100,12 @@ def _parse_bool(value: str | None, default: bool = False) -> bool:
 
 
 def _get_default_model() -> str:
-    """Get the appropriate default model based on API mode."""
+    """
+    Return the default model name for the currently configured API mode.
+    
+    Returns:
+        default_model (str): The Ollama default model when Ollama mode is active; otherwise the standard default model.
+    """
     return DEFAULT_OLLAMA_MODEL if _is_ollama_mode() else DEFAULT_MODEL
 
 
@@ -123,7 +127,25 @@ async def get_settings():
 
 @router.patch("", response_model=SettingsResponse)
 async def update_settings(update: SettingsUpdate):
-    """Update global settings."""
+    """
+    Apply partial updates to global settings from the provided update object.
+    
+    Parameters:
+        update (SettingsUpdate): Object containing optional fields to update; only fields that are not None are persisted:
+            - yolo_mode (bool): enable or disable YOLO mode
+            - model (str): selected model name
+            - testing_agent_ratio (int): ratio used for testing agent selection
+            - preferred_ide (str | None): preferred IDE identifier
+    
+    Returns:
+        SettingsResponse: The current global settings after applying updates, including:
+            - yolo_mode (bool)
+            - model (str)
+            - glm_mode (bool)
+            - ollama_mode (bool)
+            - testing_agent_ratio (int)
+            - preferred_ide (str | None)
+    """
     if update.yolo_mode is not None:
         set_setting("yolo_mode", "true" if update.yolo_mode else "false")
 
@@ -151,10 +173,11 @@ async def update_settings(update: SettingsUpdate):
 
 @router.get("/denied-commands", response_model=DeniedCommandsResponse)
 async def get_denied_commands_list():
-    """Get list of recently denied commands.
-
-    Returns the last 100 commands that were blocked by the security system.
-    Useful for debugging and understanding what commands agents tried to run.
+    """
+    Retrieve recent security-denied commands.
+    
+    Returns:
+        DeniedCommandsResponse: Contains `commands` — a list of denied command entries (each with `command`, `reason`, `timestamp`, and `project_dir`) and `count` — the total number of entries.
     """
     denied = get_denied_commands()
     return DeniedCommandsResponse(
@@ -173,6 +196,11 @@ async def get_denied_commands_list():
 
 @router.delete("/denied-commands")
 async def clear_denied_commands_list():
-    """Clear the denied commands history."""
+    """
+    Clear the stored history of denied commands.
+    
+    Returns:
+        dict: A dictionary with the key `status` set to `'cleared'` indicating the denied commands history was cleared.
+    """
     clear_denied_commands()
     return {"status": "cleared"}

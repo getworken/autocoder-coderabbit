@@ -12,29 +12,28 @@ PROJECT_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
 
 def is_valid_project_name(name: str) -> bool:
     """
-    Check if project name is valid.
-
-    Args:
-        name: Project name to validate
-
+    Determine whether a project name matches the allowed pattern.
+    
+    Project names must be 1–50 characters long and may contain letters, digits, underscores, or hyphens.
+    
+    Parameters:
+        name: The project name to validate.
+    
     Returns:
-        True if valid, False otherwise
+        True if the name matches the allowed pattern, False otherwise.
     """
     return bool(PROJECT_NAME_PATTERN.match(name))
 
 
 def validate_project_name(name: str) -> str:
     """
-    Validate and sanitize project name to prevent path traversal.
-
-    Args:
-        name: Project name to validate
-
+    Validate a project name against the allowed pattern and return it if valid.
+    
     Returns:
-        The validated project name
-
+        The validated project name.
+    
     Raises:
-        HTTPException: If name is invalid
+        HTTPException: If `name` does not match the allowed pattern (letters, numbers, hyphens, and underscores; 1-50 characters).
     """
     if not is_valid_project_name(name):
         raise HTTPException(

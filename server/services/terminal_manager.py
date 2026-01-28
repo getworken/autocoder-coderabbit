@@ -441,7 +441,11 @@ class TerminalSession:
             logger.warning(f"Failed to resize terminal: {e}")
 
     async def stop(self) -> None:
-        """Stop the terminal session and clean up resources."""
+        """
+        Stop the terminal session and release its resources.
+        
+        Cancels the background output reader task, invokes platform-specific shutdown and process cleanup, and marks the session inactive. Any errors encountered during shutdown are logged and suppressed.
+        """
         if not self._is_active:
             return
 
@@ -467,11 +471,10 @@ class TerminalSession:
         logger.info(f"Terminal stopped for {self.project_name}")
 
     async def _stop_windows(self) -> None:
-        """Stop Windows PTY process and all child processes.
-
-        We use a two-phase approach:
-        1. psutil to gracefully terminate the process tree
-        2. Windows taskkill /T /F as a fallback to catch any orphans
+        """
+        Stop the Windows PTY process and its child processes for this session.
+        
+        Attempts to gracefully terminate the PTY's process tree (via psutil) and falls back to invoking Windows taskkill to clean up any remaining or orphaned processes. If no PTY process is present this is a no-op. Clears the internal PTY process reference on completion.
         """
         if self._pty_process is None:
             return

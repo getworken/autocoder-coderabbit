@@ -38,15 +38,18 @@ class QualityGateResult(TypedDict):
 
 def _run_command(cmd: list[str], cwd: Path, timeout: int = 60) -> tuple[int, str, int]:
     """
-    Run a command and return (exit_code, output, duration_ms).
-
-    Args:
-        cmd: Command and arguments as a list
-        cwd: Working directory
-        timeout: Timeout in seconds
-
+    Execute a shell command in the given working directory and return its result and duration.
+    
+    Parameters:
+        cmd (list[str]): Command and arguments to execute.
+        cwd (Path): Working directory where the command runs.
+        timeout (int): Maximum time in seconds to allow the command to run.
+    
     Returns:
-        (exit_code, combined_output, duration_ms)
+        tuple[int, str, int]: (exit_code, combined_output, duration_ms)
+            - exit_code: process exit code; `124` if the command timed out, `127` if the executable was not found, `1` for other internal errors.
+            - combined_output: stdout and stderr concatenated and trimmed of surrounding whitespace.
+            - duration_ms: elapsed time in milliseconds measuring command execution (or until timeout/exception).
     """
     import time
     start = time.time()
@@ -102,10 +105,20 @@ def _detect_js_linter(project_dir: Path) -> tuple[str, list[str]] | None:
 
 def _detect_python_linter(project_dir: Path) -> tuple[str, list[str]] | None:
     """
-    Detect the Python linter to use.
-
+    Detects an available Python linter for the given project.
+    
+    Checks in this order and returns the first match:
+    1. `ruff` available on PATH -> ("ruff", ["ruff", "check", "."])
+    2. `flake8` available on PATH -> ("flake8", ["flake8", "."])
+    3. `venv/bin/ruff` inside the project directory -> ("ruff", [venv_path, "check", "."])
+    4. `venv/bin/flake8` inside the project directory -> ("flake8", [venv_path, "."])
+    
+    Parameters:
+        project_dir (Path): Path to the project root where a virtual environment may exist.
+    
     Returns:
-        (name, command) tuple, or None if no linter detected
+        tuple[str, list[str]] | None: A (name, command) tuple where `name` is the linter identifier
+        and `command` is the argument list to run it, or `None` if no linter is detected.
     """
     # Check for ruff
     if shutil.which("ruff"):
@@ -129,10 +142,10 @@ def _detect_python_linter(project_dir: Path) -> tuple[str, list[str]] | None:
 
 def _detect_type_checker(project_dir: Path) -> tuple[str, list[str]] | None:
     """
-    Detect the type checker to use.
-
+    Select an appropriate TypeScript or Python type checker for the given project and provide the command to invoke it.
+    
     Returns:
-        (name, command) tuple, or None if no type checker detected
+        `(name, command)` tuple where `name` is the detected checker ('tsc' or 'mypy') and `command` is the CLI invocation as a list of strings, or `None` if no checker is found.
     """
     # TypeScript
     if (project_dir / "tsconfig.json").exists():
@@ -154,15 +167,19 @@ def _detect_type_checker(project_dir: Path) -> tuple[str, list[str]] | None:
 
 def run_lint_check(project_dir: Path) -> QualityCheckResult:
     """
-    Run lint check on the project.
-
-    Automatically detects the appropriate linter based on project type.
-
-    Args:
-        project_dir: Path to the project directory
-
+    Detects a JavaScript/TypeScript or Python linter for the given project, runs it, and returns a structured lint result.
+    
+    Detection tries JS/TS linters first, then Python linters. If no linter is found the check is skipped and reported as passed. Linter output is truncated to 5000 characters with a "\n... (truncated)" suffix when longer.
+    
+    Parameters:
+        project_dir (Path): Path to the project root used to detect and execute the linter.
+    
     Returns:
-        QualityCheckResult with lint results
+        QualityCheckResult: A mapping with:
+            - name: descriptive name of the check (e.g., "lint (eslint)" or "lint"),
+            - passed: `true` if the linter exited with code 0 or the check was skipped,
+            - output: the linter output, "No issues found" when empty, or a skip message,
+            - duration_ms: execution duration in milliseconds (0 when skipped).
     """
     # Try JS/TS linter first
     linter = _detect_js_linter(project_dir)
@@ -195,15 +212,20 @@ def run_lint_check(project_dir: Path) -> QualityCheckResult:
 
 def run_type_check(project_dir: Path) -> QualityCheckResult:
     """
-    Run type check on the project.
-
-    Automatically detects the appropriate type checker based on project type.
-
-    Args:
-        project_dir: Path to the project directory
-
+    Run a type checker for the given project and return its result.
+    
+    Detects an appropriate type checker for the project; if none is found the check is skipped.
+    
+    Parameters:
+        project_dir (Path): Project root directory in which to detect and run the type checker.
+    
     Returns:
-        QualityCheckResult with type check results
+        QualityCheckResult: A dict with fields:
+            - name (str): Identifier for the check (e.g. "type_check (mypy)").
+            - passed (bool): `true` if the checker exited with code 0, `false` otherwise.
+            - output (str): Combined stdout/stderr from the checker, or a message such as
+              "No type checker detected, skipping type check" or "No type errors found".
+            - duration_ms (int): Execution duration in milliseconds (0 for skipped checks).
     """
     checker = _detect_type_checker(project_dir)
 
@@ -236,15 +258,21 @@ def run_custom_script(
     explicit_config: bool = False,
 ) -> QualityCheckResult | None:
     """
-    Run a custom quality check script.
-
-    Args:
-        project_dir: Path to the project directory
-        script_path: Path to the script (relative to project), defaults to .autocoder/quality-checks.sh
-        explicit_config: If True, user explicitly configured this script, so missing = error
-
+    Run a project-specific custom quality-check shell script and return its result.
+    
+    If `script_path` is omitted, the default ".autocoder/quality-checks.sh" is used. If the resolved script does not exist:
+    - returns `None` when the default script is missing and the script was not explicitly configured;
+    - returns a failed `QualityCheckResult` when the user explicitly provided or enabled a script and it is missing.
+    
+    The function attempts to make the script executable, runs it via `bash` with a 300-second timeout, truncates output longer than 10000 characters, and treats an empty output as a successful completion message.
+    
+    Parameters:
+        project_dir (Path): Path to the project root containing the script.
+        script_path (str | None): Relative path to the custom script within the project. Defaults to ".autocoder/quality-checks.sh".
+        explicit_config (bool): When True, a missing script is considered a configuration error and returns a failing result.
+    
     Returns:
-        QualityCheckResult, or None if default script doesn't exist
+        QualityCheckResult | None: A result dictionary with keys `name`, `passed`, `output`, and `duration_ms`, or `None` if the default script was absent and not explicitly configured.
     """
     user_configured = script_path is not None or explicit_config
 
@@ -297,17 +325,21 @@ def verify_quality(
     custom_script_path: str | None = None,
 ) -> QualityGateResult:
     """
-    Run all configured quality checks.
-
-    Args:
-        project_dir: Path to the project directory
-        run_lint: Whether to run lint check
-        run_type_check: Whether to run type check
-        run_custom: Whether to run custom script
-        custom_script_path: Path to custom script (optional)
-
+    Run the enabled quality checks for a project and return an aggregated result.
+    
+    Parameters:
+        project_dir (Path): Path to the project directory to run checks in.
+        run_lint (bool): If True, run the lint check.
+        run_type_check (bool): If True, run the type checker.
+        run_custom (bool): If True, run the custom script check.
+        custom_script_path (str | None): Path to a custom quality script; if provided, the script is treated as explicitly configured (missing script is treated as a failure).
+    
     Returns:
-        QualityGateResult with all check results
+        QualityGateResult: Aggregated result containing:
+            - passed: `true` if all executed checks passed, `false` otherwise.
+            - timestamp: UTC ISO-formatted time when checks completed.
+            - checks: mapping of individual check names to their QualityCheckResult.
+            - summary: a short human-readable summary of passed/failed checks.
     """
     checks: dict[str, QualityCheckResult] = {}
     all_passed = True
@@ -355,13 +387,18 @@ def verify_quality(
 
 def load_quality_config(project_dir: Path) -> dict:
     """
-    Load quality gates configuration from .autocoder/config.json.
-
-    Args:
-        project_dir: Path to the project directory
-
+    Load and merge quality gates configuration from .autocoder/config.json with sensible defaults.
+    
+    If the file is missing or cannot be read/parsed, the default configuration is returned.
+    
+    Parameters:
+        project_dir (Path): Project root directory used to locate `.autocoder/config.json`.
+    
     Returns:
-        Quality gates config dict with defaults applied
+        dict: Configuration with keys:
+            - "enabled" (bool)
+            - "strict_mode" (bool)
+            - "checks" (dict) mapping check names ("lint", "type_check", "unit_tests", "custom_script") to their configured values or defaults.
     """
     defaults = {
         "enabled": True,

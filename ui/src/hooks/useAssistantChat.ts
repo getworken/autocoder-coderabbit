@@ -23,19 +23,31 @@ interface UseAssistantChatReturn {
   clearMessages: () => void;
 }
 
+/**
+ * Creates a short, time-ordered identifier suitable for temporary unique IDs.
+ *
+ * @returns A string identifier combining the current timestamp and a random suffix
+ */
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 /**
- * Type-safe helper to get a string value from unknown input
+ * Return the input if it is a string, otherwise return the provided fallback.
+ *
+ * @param value - The value to check for a string
+ * @param fallback - The string to return when `value` is not a string
+ * @returns The original `value` when it is a string, otherwise `fallback`
  */
 function getStringValue(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
 /**
- * Type-safe helper to get a feature ID from unknown input
+ * Converts a numeric or string feature identifier into a stable string, returning `"unknown"` for other types.
+ *
+ * @param value - The value to derive a feature ID from.
+ * @returns The input coerced to a string when `value` is a number or string, otherwise `"unknown"`.
  */
 function getFeatureId(value: unknown): string {
   if (typeof value === "number" || typeof value === "string") {
@@ -45,7 +57,11 @@ function getFeatureId(value: unknown): string {
 }
 
 /**
- * Get a user-friendly description for tool calls
+ * Produce a concise, user-facing description for a tool call.
+ *
+ * @param tool - The tool identifier (may be prefixed with `mcp__features__`).
+ * @param input - The tool call payload; specific fields (e.g., `name`, `features`, `feature_id`, `file_path`, `pattern`) are used to build the description when available.
+ * @returns A human-readable description of the requested tool action.
  */
 function getToolDescription(
   tool: string,
@@ -82,6 +98,21 @@ function getToolDescription(
   }
 }
 
+/**
+ * React hook that manages an assistant chat over a WebSocket for the specified project.
+ *
+ * @param projectName - Project identifier used to construct the assistant WebSocket URL
+ * @param onError - Optional callback invoked with a human-readable error message when connection or server errors occur
+ * @returns An object exposing chat state and controls:
+ *  - `messages`: chat history array
+ *  - `isLoading`: whether the assistant is currently producing a response
+ *  - `connectionStatus`: WebSocket connection state ("disconnected" | "connecting" | "connected" | "error")
+ *  - `conversationId`: current conversation identifier or `null`
+ *  - `start(conversationId?)`: initiate or resume a conversation
+ *  - `sendMessage(content)`: send a user message to the assistant
+ *  - `disconnect()`: close the connection and stop reconnection attempts
+ *  - `clearMessages()`: clear the local message history (does not reset `conversationId`)
+ */
 export function useAssistantChat({
   projectName,
   onError,

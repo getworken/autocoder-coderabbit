@@ -58,17 +58,20 @@ async def run_agent_session(
     project_dir: Path,
 ) -> tuple[str, str]:
     """
-    Run a single agent session using Claude Agent SDK.
-
-    Args:
-        client: Claude SDK client
-        message: The prompt to send
-        project_dir: Project directory path
-
+    Run a single interaction with the Claude Agent SDK and stream the assistant and tool output to stdout.
+    
+    Parameters:
+        client (ClaudeSDKClient): SDK client used to send the prompt and receive streamed messages.
+        message (str): Prompt text to send to the agent.
+        project_dir (Path): Project directory path used for contextual output.
+    
     Returns:
-        (status, response_text) where status is:
-        - "continue" if agent should continue working
-        - "error" if an error occurred
+        tuple[str, str]: A pair (status, payload) where:
+            - status is `"continue"` when the session completed normally,
+              `"rate_limit"` when a rate-limit error was detected, or `"error"` for other failures.
+            - payload is the assistant's concatenated response text when status is `"continue"`,
+              the retry-after seconds as a string or `"unknown"` when status is `"rate_limit"`,
+              or the error message when status is `"error"`.
     """
     print("Sending prompt to Claude Agent SDK...\n")
 

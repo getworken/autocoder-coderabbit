@@ -41,17 +41,14 @@ _engine_cache_lock = threading.Lock()
 
 
 def _is_network_path(path: Path) -> bool:
-    """Detect if path is on a network filesystem.
-
-    WAL mode doesn't work reliably on network filesystems (NFS, SMB, CIFS)
-    and can cause database corruption. This function detects common network
-    path patterns so we can fall back to DELETE mode.
-
-    Args:
-        path: The path to check
-
+    """
+    Detects whether a given path is located on a network filesystem.
+    
+    Detection is best-effort and may be conservative; if platform or system
+    information cannot be inspected, the function will return False.
+    
     Returns:
-        True if the path appears to be on a network filesystem
+        True if the path appears to be on a network filesystem, False otherwise.
     """
     path_str = str(path.resolve())
 
@@ -92,14 +89,23 @@ def _is_network_path(path: Path) -> bool:
 
 
 def get_database_path(project_dir: Path) -> Path:
-    """Return the path to the SQLite database for a project."""
+    """
+    Get the filesystem path for the project's SQLite database file.
+    
+    Returns:
+        database_path (Path): Path to the 'features.db' file inside the given project directory.
+    """
     return project_dir / "features.db"
 
 
 def get_database_url(project_dir: Path) -> str:
-    """Return the SQLAlchemy database URL for a project.
-
-    Uses POSIX-style paths (forward slashes) for cross-platform compatibility.
+    """
+    Builds the SQLAlchemy SQLite database URL for the given project directory.
+    
+    The path portion uses POSIX-style forward slashes for cross-platform compatibility.
+    
+    Returns:
+        database_url (str): SQLite URL pointing to the project's features.db (e.g. "sqlite:////path/to/features.db").
     """
     db_path = get_database_path(project_dir)
     return f"sqlite:///{db_path.as_posix()}"
@@ -107,24 +113,18 @@ def get_database_url(project_dir: Path) -> str:
 
 def get_robust_connection(db_path: Path) -> sqlite3.Connection:
     """
-    Get a robust SQLite connection with proper settings for concurrent access.
-
-    This should be used by all code that accesses the database directly via sqlite3
-    (not through SQLAlchemy). It ensures consistent settings across all access points.
-
-    Settings applied:
-    - WAL mode for better concurrency (unless on network filesystem)
-    - Busy timeout of 30 seconds
-    - Synchronous mode NORMAL for balance of safety and performance
-
-    Args:
-        db_path: Path to the SQLite database file
-
+    Open and configure a sqlite3.Connection optimized for concurrent access.
+    
+    Configures the connection with a 30-second busy timeout, enables WAL journal mode when the database file is on a local filesystem, and sets synchronous mode to NORMAL.
+    
+    Parameters:
+        db_path (Path): Path to the SQLite database file.
+    
     Returns:
-        Configured sqlite3.Connection
-
+        sqlite3.Connection: Configured SQLite connection.
+    
     Raises:
-        sqlite3.Error: If connection cannot be established
+        sqlite3.Error: If the database connection or PRAGMA configuration fails.
     """
     conn = sqlite3.connect(str(db_path), timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
 
@@ -148,18 +148,13 @@ def get_robust_connection(db_path: Path) -> sqlite3.Connection:
 @contextmanager
 def robust_db_connection(db_path: Path):
     """
-    Context manager for robust SQLite connections with automatic cleanup.
-
-    Usage:
-        with robust_db_connection(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM features")
-
-    Args:
-        db_path: Path to the SQLite database file
-
+    Context manager that yields a configured sqlite3.Connection and ensures it is closed on exit.
+    
+    Parameters:
+        db_path (Path): Path to the SQLite database file.
+    
     Yields:
-        Configured sqlite3.Connection
+        sqlite3.Connection: A configured connection to the database; closed when the context exits.
     """
     conn = None
     try:
@@ -178,22 +173,21 @@ def execute_with_retry(
     max_retries: int = SQLITE_MAX_RETRIES
 ) -> Any:
     """
-    Execute a SQLite query with automatic retry on transient errors.
-
-    Handles SQLITE_BUSY and SQLITE_LOCKED errors with exponential backoff.
-
-    Args:
-        db_path: Path to the SQLite database file
-        query: SQL query to execute
-        params: Query parameters (tuple)
-        fetch: What to fetch - "none", "one", "all"
-        max_retries: Maximum number of retry attempts
-
+    Execute a SQL statement against the given SQLite file and retry on transient lock/busy errors.
+    
+    Parameters:
+        db_path (Path): Path to the SQLite database file.
+        query (str): SQL statement to execute.
+        params (tuple): Parameters to bind to the SQL statement.
+        fetch (str): Result mode: "none" commits and returns the number of affected rows, "one" returns a single row (or None), "all" returns all rows as a list.
+        max_retries (int): Maximum number of retry attempts for transient errors.
+    
     Returns:
-        Query result based on fetch parameter
-
+        int | tuple | list | None: For `fetch == "none"`, the number of rows affected; for `fetch == "one"`, a single row tuple or `None`; for `fetch == "all"`, a list of row tuples.
+    
     Raises:
-        sqlite3.Error: If query fails after all retries
+        sqlite3.DatabaseError: On database corruption or other database-level errors.
+        sqlite3.OperationalError: If the statement fails after all retries (including persistent lock/busy conditions).
     """
     last_error = None
     delay = SQLITE_RETRY_DELAY_MS / 1000  # Convert to seconds
@@ -241,13 +235,17 @@ def execute_with_retry(
 
 def check_database_health(db_path: Path) -> dict:
     """
-    Check the health of a SQLite database.
-
+    Assess the integrity and journal mode of a SQLite database file.
+    
+    Parameters:
+        db_path (Path): Path to the SQLite database file to check.
+    
     Returns:
-        Dict with:
-        - healthy (bool): True if database passes integrity check
-        - journal_mode (str): Current journal mode (WAL/DELETE/etc)
-        - error (str, optional): Error message if unhealthy
+        dict: A dictionary containing:
+            - healthy (bool): `True` if the database passes PRAGMA integrity_check, `False` otherwise.
+            - journal_mode (str, optional): The current journal mode (e.g., "WAL", "DELETE") when available.
+            - integrity (str, optional): The raw result of PRAGMA integrity_check when available (e.g., "ok").
+            - error (str, optional): Error message when the file is missing or an integrity/IO error occurred.
     """
     if not db_path.exists():
         return {"healthy": False, "error": "Database file does not exist"}
@@ -342,22 +340,13 @@ def create_database(project_dir: Path) -> tuple:
 
 def checkpoint_wal(project_dir: Path) -> bool:
     """
-    Checkpoint the WAL file to ensure all changes are written to the main database.
-
-    This should be called before exiting the orchestrator to ensure data durability
-    and prevent database corruption when multiple agents are running.
-
-    WAL checkpoint modes:
-    - PASSIVE (0): Checkpoint as much as possible without blocking
-    - FULL (1): Checkpoint everything, block writers if necessary
-    - RESTART (2): Like FULL but also truncate WAL
-    - TRUNCATE (3): Like RESTART but ensure WAL is zero bytes
-
-    Args:
-        project_dir: Directory containing the project database
-
+    Force a WAL checkpoint for the project's SQLite database to flush and truncate the WAL into the main database.
+    
+    Parameters:
+        project_dir (Path): Directory containing the project's SQLite database file (features.db).
+    
     Returns:
-        True if checkpoint succeeded, False otherwise
+        `true` if the checkpoint succeeded or the database file does not exist, `false` otherwise.
     """
     db_path = get_database_path(project_dir)
     if not db_path.exists():
@@ -386,13 +375,10 @@ def checkpoint_wal(project_dir: Path) -> bool:
 
 def invalidate_engine_cache(project_dir: Path) -> None:
     """
-    Invalidate the engine cache for a specific project.
-
-    Call this when you need to ensure fresh database connections, e.g.,
-    after subprocess commits that may not be visible to the current connection.
-
-    Args:
-        project_dir: Directory containing the project
+    Invalidate and dispose the cached SQLAlchemy Engine and SessionLocal for the given project directory.
+    
+    Parameters:
+        project_dir (Path): Path to the project directory whose cached engine should be removed.
     """
     cache_key = project_dir.resolve().as_posix()
     with _engine_cache_lock:
@@ -411,17 +397,24 @@ _session_maker: Optional[sessionmaker] = None
 
 
 def set_session_maker(session_maker: sessionmaker) -> None:
-    """Set the global session maker."""
+    """
+    Configure the module-wide SQLAlchemy session factory used by get_db and get_db_session.
+    
+    Parameters:
+        session_maker (sessionmaker): A SQLAlchemy sessionmaker instance to use as the global session factory.
+    """
     global _session_maker
     _session_maker = session_maker
 
 
 def get_db() -> Session:
     """
-    Dependency for FastAPI to get database session.
-
-    Yields a database session and ensures it's closed after use.
-    Properly rolls back on error to prevent PendingRollbackError.
+    Provide a SQLAlchemy Session for FastAPI dependency injection.
+    
+    Yields a Session for database operations and ensures the session is closed afterwards. On exception, rolls back the transaction before re-raising.
+    
+    Returns:
+        Session: A SQLAlchemy Session instance for use in request handling.
     """
     if _session_maker is None:
         raise RuntimeError("Database not initialized. Call set_session_maker first.")

@@ -29,7 +29,15 @@ from ..utils.validation import validate_project_name
 
 
 def _get_project_path(project_name: str) -> Path:
-    """Get project path from registry."""
+    """
+    Resolve the filesystem path for a project using the registry.
+    
+    Parameters:
+        project_name (str): The project name to resolve.
+    
+    Returns:
+        Path: Filesystem path to the project's root directory.
+    """
     root = Path(__file__).parent.parent.parent
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
@@ -46,14 +54,17 @@ router = APIRouter(
 
 @contextmanager
 def _get_db_session(project_name: str) -> Generator[Tuple[Session, Path], None, None]:
-    """Get database session for a project as a context manager.
-
-    Usage:
-        with _get_db_session(project_name) as (db, project_path):
-            # ... use db ...
-        # db is automatically closed
-
-    Properly rolls back on error to prevent PendingRollbackError.
+    """
+    Provide a project-scoped SQLAlchemy session and the project's filesystem path as a context manager.
+    
+    Yields:
+        (db, project_path) (tuple[Session, Path]): `db` is an active SQLAlchemy Session bound to the project's database; `project_path` is the resolved project directory Path.
+    
+    Details:
+        - Validates `project_name` before resolving the project path.
+        - Raises HTTPException(status_code=404) if the project is not registered or the project directory does not exist.
+        - If an exception occurs while the caller is using the yielded session, the session is rolled back before the exception is re-raised.
+        - The session is always closed when the context manager exits.
     """
     from api.database import create_database
 
@@ -85,7 +96,18 @@ def _get_db_session(project_name: str) -> Generator[Tuple[Session, Path], None, 
 
 @router.get("", response_model=ScheduleListResponse)
 async def list_schedules(project_name: str):
-    """Get all schedules for a project."""
+    """
+    Retrieve all schedules for a project.
+    
+    Parameters:
+        project_name (str): Project name to list schedules for; validated and resolved to a project-specific database.
+    
+    Returns:
+        ScheduleListResponse: Object containing a list of schedules, each with full schedule fields including id, project_name, start_time, duration_minutes, days_of_week, enabled, yolo_mode, model, max_concurrency, crash_count, and created_at.
+    
+    Raises:
+        HTTPException: 404 if the project is not found or its project directory is missing.
+    """
     from api.database import Schedule
 
     with _get_db_session(project_name) as (db, _):
@@ -115,7 +137,15 @@ async def list_schedules(project_name: str):
 
 @router.post("", response_model=ScheduleResponse, status_code=201)
 async def create_schedule(project_name: str, data: ScheduleCreate):
-    """Create a new schedule for a project."""
+    """
+    Create a new schedule for a project and register it with the scheduler if the schedule is enabled.
+    
+    Returns:
+        ScheduleResponse: The created schedule, including server-assigned fields such as `id`, `max_concurrency`, `crash_count`, and `created_at`.
+    
+    Raises:
+        HTTPException: If the project has reached the maximum allowed schedules (400).
+    """
     from api.database import Schedule
 
     from ..services.scheduler_service import get_scheduler
@@ -262,7 +292,12 @@ async def get_next_scheduled_run(project_name: str):
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
 async def get_schedule(project_name: str, schedule_id: int):
-    """Get a single schedule by ID."""
+    """
+    Retrieve a schedule for the given project by its numeric ID.
+    
+    Returns:
+        ScheduleResponse: The schedule data including `id`, `project_name`, `start_time`, `duration_minutes`, `days_of_week`, `enabled`, `yolo_mode`, `model`, `max_concurrency`, `crash_count`, and `created_at`.
+    """
     from api.database import Schedule
 
     with _get_db_session(project_name) as (db, _):
@@ -295,7 +330,17 @@ async def update_schedule(
     schedule_id: int,
     data: ScheduleUpdate
 ):
-    """Update an existing schedule."""
+    """
+    Update fields of an existing schedule and synchronize scheduler jobs.
+    
+    Updates only fields provided in `data`, persists changes, and re-registers or removes the schedule from the scheduler as needed.
+    
+    Returns:
+        ScheduleResponse: The updated schedule record.
+    
+    Raises:
+        HTTPException: Raised with status code 404 if the schedule is not found for the given project.
+    """
     from api.database import Schedule
 
     from ..services.scheduler_service import get_scheduler

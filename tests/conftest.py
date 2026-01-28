@@ -25,13 +25,23 @@ if str(PROJECT_ROOT) not in sys.path:
 
 @pytest.fixture
 def project_root() -> Path:
-    """Return the project root directory."""
+    """
+    Get the project's root directory.
+    
+    Returns:
+        Path: Filesystem path pointing to the project's root directory.
+    """
     return PROJECT_ROOT
 
 
 @pytest.fixture
 def temp_project_dir(tmp_path: Path) -> Path:
-    """Create a temporary project directory with basic structure."""
+    """
+    Create a temporary project directory named "test_project" containing an empty "prompts" subdirectory.
+    
+    Returns:
+        Path: Path to the created project directory.
+    """
     project_dir = tmp_path / "test_project"
     project_dir.mkdir()
 
@@ -49,9 +59,13 @@ def temp_project_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def temp_db(tmp_path: Path) -> Generator[Path, None, None]:
-    """Create a temporary database for testing.
-
-    Yields the path to the temp project directory with an initialized database.
+    """
+    Create a temporary database for testing.
+    
+    Yields a Path to a temporary project directory named "test_db_project" that contains an initialized database and a "prompts" subdirectory. When the fixture is torn down, the database engine cache for that project directory is invalidated to release file handles.
+    
+    Returns:
+        project_dir (Path): Path to the temporary project directory with an initialized database.
     """
     from api.database import create_database, invalidate_engine_cache
 
@@ -72,9 +86,11 @@ def temp_db(tmp_path: Path) -> Generator[Path, None, None]:
 
 @pytest.fixture
 def db_session(temp_db: Path):
-    """Get a database session for testing.
-
-    Provides a session that is automatically rolled back after each test.
+    """
+    Provide an active SQLAlchemy session for tests that is rolled back and closed after the test.
+    
+    Yields:
+        session (Session): A database session connected to the temporary test database. The session will be rolled back and closed automatically when the fixture teardown runs.
     """
     from api.database import create_database
 
@@ -95,9 +111,10 @@ def db_session(temp_db: Path):
 
 @pytest.fixture
 async def async_temp_db(tmp_path: Path) -> AsyncGenerator[Path, None]:
-    """Async version of temp_db fixture.
-
-    Creates a temporary database for async tests.
+    """
+    Create a temporary project directory with an initialized database for async tests.
+    
+    Yields the Path to the temporary project directory containing an initialized database. On teardown, invalidates the database engine cache for that project to avoid file locks (Windows).
     """
     from api.database import create_database, invalidate_engine_cache
 
@@ -121,9 +138,11 @@ async def async_temp_db(tmp_path: Path) -> AsyncGenerator[Path, None]:
 
 @pytest.fixture
 def test_app():
-    """Create a test FastAPI application instance.
-
-    Returns the FastAPI app configured for testing.
+    """
+    Provide the FastAPI application instance for tests.
+    
+    Returns:
+        app (FastAPI): The application instance imported from server.main.
     """
     from server.main import app
 
@@ -132,12 +151,14 @@ def test_app():
 
 @pytest.fixture
 async def async_client(test_app) -> AsyncGenerator:
-    """Create an async HTTP client for testing FastAPI endpoints.
-
-    Usage:
-        async def test_endpoint(async_client):
-            response = await async_client.get("/api/health")
-            assert response.status_code == 200
+    """
+    Provide an HTTP client configured to send requests to the given FastAPI app.
+    
+    Parameters:
+        test_app (FastAPI): The FastAPI application instance to mount into the client's ASGI transport.
+    
+    Returns:
+        AsyncClient: An `httpx.AsyncClient` configured with an `ASGITransport` for `test_app` and `base_url="http://test"`.
     """
     from httpx import ASGITransport, AsyncClient
 
@@ -155,14 +176,24 @@ async def async_client(test_app) -> AsyncGenerator:
 
 @pytest.fixture
 def mock_env(monkeypatch):
-    """Fixture to safely modify environment variables.
-
-    Usage:
-        def test_with_env(mock_env):
-            mock_env("API_KEY", "test_key")
-            # Test code here
+    """
+    Provide a pytest fixture that returns a helper to set environment variables via pytest's monkeypatch.
+    
+    The returned function sets the environment variable named `key` to `value` for the duration of the test.
+    
+    Returns:
+        callable: A function `(key: str, value: str)` that sets an environment variable.
     """
     def _set_env(key: str, value: str):
+        """
+        Set an environment variable for the current test.
+        
+        The variable is applied for the duration of the test and will be restored when the pytest monkeypatch fixture is undone.
+        
+        Parameters:
+            key (str): Environment variable name.
+            value (str): Value to assign to the environment variable.
+        """
         monkeypatch.setenv(key, value)
 
     return _set_env
@@ -170,12 +201,16 @@ def mock_env(monkeypatch):
 
 @pytest.fixture
 def mock_project_dir(tmp_path: Path) -> Generator[Path, None, None]:
-    """Create a fully configured mock project directory.
-
-    Includes:
-    - prompts/ directory with sample files
-    - .autocoder/ directory for config
-    - features.db initialized
+    """
+    Creates a temporary mock project directory containing prompts, configuration, and an initialized database.
+    
+    The directory contains:
+    - prompts/ with a sample app_spec.txt
+    - .autocoder/ for config
+    - an initialized features.db via create_database
+    
+    Returns:
+        project_dir (Path): Path to the created mock project directory
     """
     from api.database import create_database, invalidate_engine_cache
 
@@ -210,7 +245,17 @@ def mock_project_dir(tmp_path: Path) -> Generator[Path, None, None]:
 
 @pytest.fixture
 def sample_feature_data() -> dict:
-    """Return sample feature data for testing."""
+    """
+    Provide a sample feature payload used by tests.
+    
+    Returns:
+        dict: A feature dictionary with keys:
+            - `priority` (int): Priority value (e.g., 1).
+            - `category` (str): Feature category (e.g., "test").
+            - `name` (str): Feature name.
+            - `description` (str): Feature description.
+            - `steps` (list[str]): Ordered list of step descriptions.
+    """
     return {
         "priority": 1,
         "category": "test",
@@ -222,9 +267,15 @@ def sample_feature_data() -> dict:
 
 @pytest.fixture
 def populated_db(temp_db: Path, sample_feature_data: dict) -> Generator[Path, None, None]:
-    """Create a database populated with sample features.
-
-    Returns the project directory path.
+    """
+    Populate the temporary project's database with five sample Feature records and yield the project directory path.
+    
+    Parameters:
+        temp_db (Path): Path to the temporary project directory where the database will be created and populated.
+        sample_feature_data (dict): Fixture-provided sample feature fields (not required by this function's population logic).
+    
+    Returns:
+        Path: The same `temp_db` path after the database has been populated.
     """
     from api.database import Feature, create_database, invalidate_engine_cache
 

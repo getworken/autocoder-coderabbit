@@ -18,8 +18,11 @@ export function useConversations(projectName: string | null) {
 }
 
 /**
- * Get a single conversation with all its messages
- */
+ * Retrieve a single conversation and its messages for the given project and conversation ID.
+ *
+ * The query is enabled only when both `projectName` and `conversationId` are truthy, caches results for 30 seconds, and applies a retry policy that does not retry on "not found" (HTTP 404) errors and otherwise allows up to 3 attempts.
+ *
+ * @returns The React Query result containing the conversation and its messages, along with query metadata.
 export function useConversation(projectName: string | null, conversationId: number | null) {
   return useQuery({
     queryKey: ['conversation', projectName, conversationId],

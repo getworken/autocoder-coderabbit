@@ -286,13 +286,12 @@ class DevServerProcessManager:
 
     async def start(self, command: str) -> tuple[bool, str]:
         """
-        Start the dev server as a subprocess.
-
-        Args:
-            command: The shell command to run (e.g., "npm run dev")
-
+        Start the project's dev server subprocess and begin streaming its output.
+        
+        Creates a lock file, records the start time, sets the manager status to "running", and launches the background output-streaming task. The shell used to run the command is chosen per platform (Windows: cmd, others: sh); stdout and stderr are merged and streamed to callbacks.
+        
         Returns:
-            Tuple of (success, message)
+            (success, message): `success` is `True` on successful start and `message` contains the started process PID; `success` is `False` and `message` describes the error otherwise.
         """
         if self.status == "running":
             return False, "Dev server is already running"

@@ -16,7 +16,15 @@ from ..utils.validation import validate_project_name
 
 
 def _get_project_path(project_name: str) -> Path:
-    """Get project path from registry."""
+    """
+    Resolve the filesystem path for a given project using the project registry.
+    
+    Parameters:
+        project_name (str): The project name to look up in the registry.
+    
+    Returns:
+        Path: Filesystem path of the project's directory as provided by the registry.
+    """
     import sys
     root = Path(__file__).parent.parent.parent
     if str(root) not in sys.path:
@@ -59,7 +67,15 @@ ROOT_DIR = Path(__file__).parent.parent.parent
 
 
 def get_project_manager(project_name: str):
-    """Get the process manager for a project."""
+    """
+    Acquire the process manager for the named project.
+    
+    Returns:
+        The project's process manager instance.
+    
+    Raises:
+        HTTPException: 404 if the project is not registered or its directory does not exist.
+    """
     project_name = validate_project_name(project_name)
     project_dir = _get_project_path(project_name)
 

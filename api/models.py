@@ -26,7 +26,12 @@ Base = declarative_base()
 
 
 def _utc_now() -> datetime:
-    """Return current UTC time."""
+    """
+    Get the current UTC datetime with timezone information.
+    
+    Returns:
+        datetime: A timezone-aware `datetime` set to UTC.
+    """
     return datetime.now(timezone.utc)
 
 
@@ -70,7 +75,29 @@ class Feature(Base):
     quality_result = Column(JSON, nullable=True)  # Last quality gate result when marked passing
 
     def to_dict(self) -> dict:
-        """Convert feature to dictionary for JSON serialization."""
+        """
+        Serialize the Feature instance to a JSON-serializable dictionary.
+        
+        Boolean status fields that are None are coerced to False; dependencies that are None or empty are returned as an empty list; datetime fields are converted to ISO 8601 strings or None.
+        
+        Returns:
+            dict: Dictionary with keys:
+                - id (int | None)
+                - priority (int)
+                - category (str)
+                - name (str)
+                - description (str)
+                - steps (list)
+                - passes (bool)
+                - in_progress (bool)
+                - dependencies (list[int])
+                - created_at (str | None) ISO 8601 timestamp or None
+                - started_at (str | None) ISO 8601 timestamp or None
+                - completed_at (str | None) ISO 8601 timestamp or None
+                - last_failed_at (str | None) ISO 8601 timestamp or None
+                - last_error (str | None)
+                - quality_result (dict | list | None)
+        """
         return {
             "id": self.id,
             "priority": self.priority,
@@ -95,7 +122,12 @@ class Feature(Base):
         }
 
     def get_dependencies_safe(self) -> list[int]:
-        """Safely extract dependencies, handling NULL and malformed data."""
+        """
+        Parse the model's dependencies field into a list of integer IDs.
+        
+        Returns:
+            list[int]: Dependency IDs as integers. Returns an empty list if `dependencies` is None, not a list, or contains no integer values.
+        """
         if self.dependencies is None:
             return []
         if isinstance(self.dependencies, list):
@@ -152,7 +184,21 @@ class FeatureAttempt(Base):
     feature = relationship("Feature", back_populates="attempts")
 
     def to_dict(self) -> dict:
-        """Convert attempt to dictionary for JSON serialization."""
+        """
+        Return a dictionary representation of the attempt suitable for JSON serialization.
+        
+        Returns:
+            dict: Mapping with the following keys:
+                id: int - attempt primary key.
+                feature_id: int - associated feature primary key.
+                agent_type: str - type of agent that ran the attempt.
+                agent_id: str | None - identifier of the agent, or `None`.
+                agent_index: int | None - numeric index of the agent, or `None`.
+                started_at: str | None - ISO 8601 timestamp of start, or `None`.
+                ended_at: str | None - ISO 8601 timestamp of end, or `None`.
+                outcome: str - attempt outcome.
+                error_message: str | None - error message if present, or `None`.
+        """
         return {
             "id": self.id,
             "feature_id": self.feature_id,
@@ -167,7 +213,12 @@ class FeatureAttempt(Base):
 
     @property
     def duration_seconds(self) -> float | None:
-        """Calculate attempt duration in seconds."""
+        """
+        Compute the duration of the attempt in seconds.
+        
+        Returns:
+            float | None: Duration in seconds if both `started_at` and `ended_at` are present, `None` otherwise.
+        """
         if self.started_at and self.ended_at:
             return (self.ended_at - self.started_at).total_seconds()
         return None
@@ -218,7 +269,24 @@ class FeatureError(Base):
     feature = relationship("Feature", back_populates="errors")
 
     def to_dict(self) -> dict:
-        """Convert error to dictionary for JSON serialization."""
+        """
+        Serialize the FeatureError into a JSON-friendly dictionary.
+        
+        Returns:
+            dict: Mapping with keys:
+                - `id`: primary key of the error record.
+                - `feature_id`: associated feature's id.
+                - `error_type`: short string classifying the error.
+                - `error_message`: human-readable error message.
+                - `stack_trace`: optional stack trace text or `None`.
+                - `agent_type`: agent category that produced the error or `None`.
+                - `agent_id`: identifier of the agent instance or `None`.
+                - `attempt_id`: related FeatureAttempt id or `None`.
+                - `occurred_at`: ISO 8601 timestamp string of when the error occurred, or `None`.
+                - `resolved`: boolean indicating whether the error has been resolved.
+                - `resolved_at`: ISO 8601 timestamp string of when the error was resolved, or `None`.
+                - `resolution_notes`: optional resolution notes or `None`.
+        """
         return {
             "id": self.id,
             "feature_id": self.feature_id,
@@ -278,7 +346,16 @@ class Schedule(Base):
     )
 
     def to_dict(self) -> dict:
-        """Convert schedule to dictionary for JSON serialization."""
+        """
+        Serialize the Schedule into a JSON-serializable dictionary.
+        
+        Included keys: `id`, `project_name`, `start_time`, `duration_minutes`, `days_of_week`,
+        `enabled`, `yolo_mode`, `model`, `max_concurrency`, `crash_count`, and `created_at`.
+        The `created_at` value is an ISO 8601 string when present, otherwise `None`.
+        
+        Returns:
+            dict: Mapping of schedule field names to their serializable values.
+        """
         return {
             "id": self.id,
             "project_name": self.project_name,
@@ -294,7 +371,15 @@ class Schedule(Base):
         }
 
     def is_active_on_day(self, weekday: int) -> bool:
-        """Check if schedule is active on given weekday (0=Monday, 6=Sunday)."""
+        """
+        Determine whether the schedule is active on the specified weekday (0=Monday, 6=Sunday).
+        
+        Parameters:
+        	weekday (int): Weekday index where 0 = Monday and 6 = Sunday.
+        
+        Returns:
+        	bool: `true` if the schedule is active on the given weekday, `false` otherwise.
+        """
         day_bit = 1 << weekday
         return bool(self.days_of_week & day_bit)
 
@@ -320,7 +405,17 @@ class ScheduleOverride(Base):
     schedule = relationship("Schedule", back_populates="overrides")
 
     def to_dict(self) -> dict:
-        """Convert override to dictionary for JSON serialization."""
+        """
+        Serialize the schedule override to a dictionary.
+        
+        Returns:
+            dict: A dictionary with keys:
+                - `id` (int | None): Override primary key.
+                - `schedule_id` (int): Associated schedule primary key.
+                - `override_type` (str): Either "start" or "stop".
+                - `expires_at` (str | None): ISO 8601 timestamp when the override expires, or `None`.
+                - `created_at` (str | None): ISO 8601 timestamp when the override was created, or `None`.
+        """
         return {
             "id": self.id,
             "schedule_id": self.schedule_id,

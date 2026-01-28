@@ -49,12 +49,14 @@ _denied_commands_lock = threading.Lock()
 
 def record_denied_command(command: str, reason: str, project_dir: Optional[Path] = None) -> None:
     """
-    Record a denied command for later review.
-
-    Args:
-        command: The command that was denied
-        reason: The reason it was denied
-        project_dir: Optional project directory context
+    Record a denied shell command event for auditing and review.
+    
+    Stores a timestamped denial entry in an in-memory, bounded history and logs a redacted preview with deterministic hashes to avoid leaking secrets.
+    
+    Parameters:
+        command (str): The full command string that was denied.
+        reason (str): Human-readable reason or rule identifier explaining the denial.
+        project_dir (Optional[Path]): Optional project directory associated with the command; stored as a string when provided.
     """
     denied = DeniedCommand(
         timestamp=datetime.now(timezone.utc).isoformat(),
@@ -72,6 +74,19 @@ def record_denied_command(command: str, reason: str, project_dir: Optional[Path]
     
     # Create redacted preview (first 20 + last 20 chars with mask in between)
     def redact_string(s: str, max_preview: int = 20) -> str:
+        """
+        Return a redacted preview of a string suitable for logging.
+        
+        Parameters:
+            s (str): The input string to redact.
+            max_preview (int): Number of characters to keep at each end when redacting. Defaults to 20.
+        
+        Returns:
+            str: The input with its middle replaced by "..." when its length exceeds max_preview * 2.
+                 - If len(s) <= max_preview, returns s unchanged.
+                 - If max_preview < len(s) <= max_preview * 2, returns the first max_preview characters followed by "...".
+                 - If len(s) > max_preview * 2, returns the first max_preview characters, "...", then the last max_preview characters.
+        """
         if len(s) <= max_preview * 2:
             return s[:max_preview] + "..." if len(s) > max_preview else s
         return f"{s[:max_preview]}...{s[-max_preview:]}"
@@ -112,10 +127,10 @@ def get_denied_commands(limit: int = 50) -> list[dict]:
 
 def clear_denied_commands() -> int:
     """
-    Clear all recorded denied commands.
-
+    Clear all stored denied command records.
+    
     Returns:
-        Number of commands that were cleared
+        int: Number of denied commands that were removed.
     """
     with _denied_commands_lock:
         count = len(_denied_commands)
@@ -163,21 +178,15 @@ DANGEROUS_SHELL_PATTERNS = [
 
 def pre_validate_command_safety(command: str) -> tuple[bool, str]:
     """
-    Pre-validate a command string for dangerous shell patterns.
-
-    This check runs BEFORE the allowlist check and blocks patterns that are
-    almost always malicious (e.g., curl piped directly to shell).
-
-    This function intentionally allows common shell features like $(), ``,
-    source, and export because they are needed for legitimate programming
-    workflows. The allowlist system provides the primary security layer.
-
-    Args:
-        command: The raw command string to validate
-
+    Pre-validate a shell command for known dangerous one-liner patterns.
+    
+    Scans the raw command for high-risk patterns (e.g., remote download piped to an interpreter or null-byte injections) and flags matches before allowlist checks. Common shell constructs used in legitimate workflows (subshells, sourcing, exports) are not considered dangerous by this function.
+    
+    Parameters:
+        command (str): The raw shell command to inspect.
+    
     Returns:
-        Tuple of (is_safe, error_message). If is_safe is False, error_message
-        describes the dangerous pattern that was detected.
+        tuple[bool, str]: `True` if no dangerous pattern was detected, `False` otherwise; the string contains a short description of the detected dangerous pattern when `False`, or an empty string when `True`.
     """
     if not command:
         return True, ""
@@ -599,10 +608,16 @@ def get_org_config_path() -> Path:
 
 def load_org_config() -> Optional[dict]:
     """
-    Load organization-level config from ~/.autocoder/config.yaml.
-
+    Load organization-level configuration from ~/.autocoder/config.yaml.
+    
+    Parses and validates the YAML structure and normalizes `pkill_processes` when present.
+    Requires a top-level mapping containing a `"version"` key. If present, `"allowed_commands"`
+    must be a list of mappings each with a non-empty `"name"`; `"blocked_commands"` must be a
+    list of strings; and `"pkill_processes"` must be a list of valid process names matching the
+    allowed process-name pattern.
+    
     Returns:
-        Dict with parsed org config, or None if file doesn't exist or is invalid
+        dict or None: Parsed and normalized organization config, or `None` if the file is missing or invalid.
     """
     config_path = get_org_config_path()
 
@@ -687,13 +702,12 @@ def load_org_config() -> Optional[dict]:
 
 def load_project_commands(project_dir: Path) -> Optional[dict]:
     """
-    Load allowed commands from project-specific YAML config.
-
-    Args:
-        project_dir: Path to the project directory
-
+    Load and validate the project-specific allowed-commands configuration from .autocoder/allowed_commands.yaml.
+    
+    The file must be a YAML mapping containing a required `version` key and an optional `commands` list (each entry must be a dict with a non-empty `name`). Enforces a maximum of 100 command entries. If present, `pkill_processes` must be a list of valid process names and will be normalized.
+    
     Returns:
-        Dict with parsed YAML config, or None if file doesn't exist or is invalid
+        Parsed configuration dict if valid; `None` if the file is missing, cannot be read/parsed, or fails validation.
     """
     config_path = project_dir.resolve() / ".autocoder" / "allowed_commands.yaml"
 
@@ -945,24 +959,17 @@ def is_command_allowed(command: str, allowed_commands: set[str]) -> bool:
 
 async def bash_security_hook(input_data, tool_use_id=None, context=None):
     """
-    Pre-tool-use hook that validates bash commands using an allowlist.
-
-    Only commands in ALLOWED_COMMANDS and project-specific commands are permitted.
-
-    Security layers (in order):
-    1. Pre-validation: Block dangerous shell patterns (command substitution, etc.)
-    2. Command extraction: Parse command into individual command names
-    3. Blocklist check: Reject hardcoded dangerous commands
-    4. Allowlist check: Only permit explicitly allowed commands
-    5. Extra validation: Additional checks for sensitive commands (pkill, chmod)
-
-    Args:
-        input_data: Dict containing tool_name and tool_input
-        tool_use_id: Optional tool use ID
-        context: Optional context dict with 'project_dir' key
-
+    Pre-tool-use security hook that validates Bash commands against allowlist, blocklist, and additional safety checks.
+    
+    Performs layered validation: pre-checks for dangerous shell patterns, extracts command names, enforces organization/project blocklist and allowlist (with pattern support), and runs extra validation for sensitive commands such as `pkill`, `chmod`, and `init.sh`. Records denied commands when blocking decisions are made.
+    
+    Parameters:
+        input_data (dict): Expected to contain "tool_name" and "tool_input" where "tool_input" holds the "command" string to validate.
+        tool_use_id (Optional[str]): Optional identifier for the tool invocation (not used for decision logic).
+        context (Optional[dict]): Optional context; if present may include "project_dir" (path string) to apply project-specific configuration and to record denied commands.
+    
     Returns:
-        Empty dict to allow, or {"decision": "block", "reason": "..."} to block
+        dict: Empty dict to allow execution, or a dict of the form `{"decision": "block", "reason": "<explanation>"}` to block execution.
     """
     if input_data.get("tool_name") != "Bash":
         return {}

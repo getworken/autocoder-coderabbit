@@ -17,6 +17,18 @@ interface ProjectSetupRequiredProps {
   onSetupComplete: () => void
 }
 
+/**
+ * Presents a setup UI for projects that are missing an app specification and guides the user
+ * through creating one either via an interactive Claude-assisted chat or by editing template files manually.
+ *
+ * When the Claude flow completes, the component attempts to start the project agent and reports failures
+ * so the user can retry; on successful completion (or when the user chooses the manual path) it invokes the
+ * provided `onSetupComplete` callback.
+ *
+ * @param projectName - Name of the project that requires an app specification
+ * @param onSetupComplete - Callback invoked after setup finishes or the user exits to the project
+ * @returns The React element that renders the project setup UI
+ */
 export function ProjectSetupRequired({ projectName, onSetupComplete }: ProjectSetupRequiredProps) {
   const [showChat, setShowChat] = useState(false)
   const [initializerStatus, setInitializerStatus] = useState<InitializerStatus>('idle')

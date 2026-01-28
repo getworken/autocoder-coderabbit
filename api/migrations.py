@@ -33,7 +33,11 @@ def migrate_add_in_progress_column(engine) -> None:
 
 
 def migrate_fix_null_boolean_fields(engine) -> None:
-    """Fix NULL values in passes and in_progress columns."""
+    """
+    Set NULL values in the features table's `passes` and `in_progress` columns to 0.
+    
+    Updates any rows in `features` where `passes` or `in_progress` are NULL to use 0 and persists the changes.
+    """
     with engine.connect() as conn:
         # Fix NULL passes values
         conn.execute(text("UPDATE features SET passes = 0 WHERE passes IS NULL"))
@@ -43,10 +47,10 @@ def migrate_fix_null_boolean_fields(engine) -> None:
 
 
 def migrate_add_dependencies_column(engine) -> None:
-    """Add dependencies column to existing databases that don't have it.
-
-    Uses NULL default for backwards compatibility - existing features
-    without dependencies will have NULL which is treated as empty list.
+    """
+    Add a nullable `dependencies` column to the `features` table if it does not exist.
+    
+    Adds a `TEXT` column named `dependencies` with `DEFAULT NULL` for backwards compatibility so existing rows remain `NULL` (interpreted by the application as an empty list).
     """
     with engine.connect() as conn:
         # Check if column exists
@@ -60,15 +64,10 @@ def migrate_add_dependencies_column(engine) -> None:
 
 
 def migrate_add_testing_columns(engine) -> None:
-    """Legacy migration - handles testing columns that were removed from the model.
-
-    The testing_in_progress and last_tested_at columns were removed from the
-    Feature model as part of simplifying the testing agent architecture.
-    Multiple testing agents can now test the same feature concurrently
-    without coordination.
-
-    This migration ensures these columns are nullable so INSERTs don't fail
-    on databases that still have them with NOT NULL constraints.
+    """
+    Make the features table's testing columns nullable to accommodate legacy schemas.
+    
+    If the features table defines `testing_in_progress` with a NOT NULL constraint, this migration recreates the table (preserving any additional existing columns and their types), copies data, rebuilds relevant indexes, and commits the change so that `testing_in_progress` and `last_tested_at` are nullable. On failure the migration rolls back and re-raises the original exception.
     """
     with engine.connect() as conn:
         # Check if testing_in_progress column exists with NOT NULL
@@ -152,7 +151,11 @@ def migrate_add_testing_columns(engine) -> None:
 
 
 def migrate_add_schedules_tables(engine) -> None:
-    """Create schedules and schedule_overrides tables if they don't exist."""
+    """
+    Create schedules and schedule_overrides tables if missing and add upgrade columns to schedules when present.
+    
+    If the `schedules` table does not exist, it is created. If the `schedule_overrides` table does not exist, it is created. If `schedules` exists, add the `crash_count` column (`INTEGER DEFAULT 0`) and the `max_concurrency` column (`INTEGER DEFAULT 3`) when they are not already present.
+    """
     from sqlalchemy import inspect
 
     inspector = inspect(engine)
@@ -241,10 +244,10 @@ def migrate_add_feature_errors_table(engine) -> None:
 
 
 def migrate_add_regression_count_column(engine) -> None:
-    """Add regression_count column to existing databases that don't have it.
-
-    This column tracks how many times a feature has been regression tested,
-    enabling least-tested-first selection for regression testing.
+    """
+    Add a regression_count column to the features table if it does not exist.
+    
+    The column is created as INTEGER DEFAULT 0 NOT NULL so existing rows start with a regression count of 0.
     """
     with engine.connect() as conn:
         # Check if column exists
@@ -259,10 +262,10 @@ def migrate_add_regression_count_column(engine) -> None:
 
 
 def migrate_add_quality_result_column(engine) -> None:
-    """Add quality_result column to existing databases that don't have it.
-
-    This column stores quality gate results (test evidence) when a feature
-    is marked as passing. Format: JSON with {passed, timestamp, checks: {...}, summary}
+    """
+    Ensure the features table has a `quality_result` column for storing quality gate results.
+    
+    Adds a nullable `quality_result` JSON column to `features` if it does not exist. The JSON is expected to contain keys such as `passed` (boolean), `timestamp` (ISO 8601 string), `checks` (object with per-check details), and `summary` (string).
     """
     with engine.connect() as conn:
         # Check if column exists

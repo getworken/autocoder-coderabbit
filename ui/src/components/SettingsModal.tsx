@@ -25,6 +25,16 @@ interface SettingsModalProps {
   onClose: () => void
 }
 
+/**
+ * Renders the Settings modal allowing the user to view and update application preferences.
+ *
+ * Displays current settings and lets the user change theme, dark mode, YOLO mode, selected model, preferred IDE, and regression agent count.
+ * Shows loading and fetch-error states while loading settings, disables interactions while a save is in progress, and surfaces save errors with an alert.
+ *
+ * @param isOpen - Whether the modal is visible
+ * @param onClose - Callback invoked when the modal requests to close
+ * @returns The settings modal React element
+ */
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { data: settings, isLoading, isError, refetch } = useSettings()
   const { data: modelsData } = useAvailableModels()

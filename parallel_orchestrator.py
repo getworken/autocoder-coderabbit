@@ -48,16 +48,13 @@ ESSENTIAL_ENV_VARS = [
 
 
 def _get_minimal_env() -> dict[str, str]:
-    """Get minimal environment for subprocess to avoid Windows command line length issues.
-
-    Windows has a command line length limit of ~32KB. When the environment is very large
-    (e.g., with many PATH entries), passing the entire environment can exceed this limit.
-
-    This function returns only essential environment variables needed for Python
-    and API operations.
-
+    """
+    Builds a minimal environment mapping suitable for subprocesses to reduce environment size.
+    
+    This returns only environment variables listed in `ESSENTIAL_ENV_VARS` that exist in the current process environment and ensures `PYTHONUNBUFFERED` is set to `"1"`. This is intended to limit subprocess environment size (for example, to avoid platform command-line/environment length limits) while preserving variables required for runtime and API access.
+    
     Returns:
-        Dictionary of essential environment variables
+        env (dict[str, str]): Mapping of environment variable names to values containing the selected essentials plus `PYTHONUNBUFFERED="1"`.
     """
     env = {}
     for var in ESSENTIAL_ENV_VARS:
@@ -92,10 +89,13 @@ logger: logging.Logger = logging.getLogger("orchestrator")
 
 def safe_asyncio_run(coro):
     """
-    Run an async coroutine with proper cleanup to avoid Windows subprocess errors.
-
-    On Windows, subprocess transports may raise 'Event loop is closed' errors
-    during garbage collection if not properly cleaned up.
+    Execute the given awaitable and ensure the event loop is cleaned up on Windows to prevent "Event loop is closed" errors with subprocess transports.
+    
+    Parameters:
+        coro (Awaitable): The coroutine or awaitable to run.
+    
+    Returns:
+        The result produced by the awaited coroutine.
     """
     if sys.platform == "win32":
         loop = asyncio.new_event_loop()
@@ -123,7 +123,13 @@ def safe_asyncio_run(coro):
 
 
 def _dump_database_state(session, label: str = ""):
-    """Helper to dump full database state to debug log."""
+    """
+    Log the current feature table state (counts and feature id lists) to the module debug logger.
+    
+    Parameters:
+        session: SQLAlchemy session connected to the project's database used to query Feature rows.
+        label (str): Optional label appended to the log to provide context for the dump.
+    """
     from api.database import Feature
     all_features = session.query(Feature).all()
 
@@ -187,18 +193,17 @@ class ParallelOrchestrator:
         on_output: Callable[[int, str], None] = None,
         on_status: Callable[[int, str], None] = None,
     ):
-        """Initialize the orchestrator.
-
-        Args:
-            project_dir: Path to the project directory
-            max_concurrency: Maximum number of concurrent coding agents (1-5).
-                Also caps testing agents at the same limit.
-            model: Claude model to use (or None for default)
-            yolo_mode: Whether to run in YOLO mode (skip testing agents entirely)
-            testing_agent_ratio: Number of regression testing agents to maintain (0-3).
-                0 = disabled, 1-3 = maintain that many testing agents running independently.
-            on_output: Callback for agent output (feature_id, line)
-            on_status: Callback for agent status changes (feature_id, status)
+        """
+        Create a ParallelOrchestrator configured for the given project.
+        
+        Parameters:
+            project_dir (Path): Path to the project directory containing the database and source tree.
+            max_concurrency (int): Requested maximum concurrent coding agents; value is clamped to the range [1, MAX_PARALLEL_AGENTS].
+            model (str | None): Name of the Claude model to use; if `None` the system default model is used.
+            yolo_mode (bool): If True, skip spawning testing agents.
+            testing_agent_ratio (int): Number of independent regression testing agents to maintain; clamped to 0–3 (0 disables testing agents).
+            on_output (Callable[[int, str], None] | None): Optional callback invoked with (feature_id, line) for each agent output line.
+            on_status (Callable[[int, str], None] | None): Optional callback invoked with (feature_id, status) when an agent's status changes.
         """
         self.project_dir = project_dir
         self.max_concurrency = min(max(max_concurrency, 1), MAX_PARALLEL_AGENTS)
@@ -303,7 +308,15 @@ class ParallelOrchestrator:
             session.close()
 
     def get_ready_features(self) -> list[dict]:
-        """Get features with satisfied dependencies, not already running."""
+        """
+        Identify features whose dependencies are satisfied and that are available to run.
+        
+        Returns:
+            ready_features (list[dict]): A list of feature dictionaries that are ready to be executed.
+                The list is sorted by scheduling score (higher first), then by priority, then by id.
+                Features that are already passing, currently in progress, already running in this
+                orchestrator, or that have exceeded the maximum retry count are excluded.
+        """
         session = self.get_session()
         try:
             # Force fresh read from database to avoid stale cached data
@@ -420,24 +433,14 @@ class ParallelOrchestrator:
             session.close()
 
     def _maintain_testing_agents(self) -> None:
-        """Maintain the desired count of testing agents independently.
-
-        This runs every loop iteration and spawns testing agents as needed to maintain
-        the configured testing_agent_ratio. Testing agents run independently from
-        coding agents and continuously re-test passing features to catch regressions.
-
-        Multiple testing agents can test the same feature concurrently - this is
-        intentional and simplifies the architecture by removing claim coordination.
-
-        Stops spawning when:
-        - YOLO mode is enabled
-        - testing_agent_ratio is 0
-        - No passing features exist yet
-
-        Race Condition Prevention:
-        - Uses placeholder pattern to reserve slot inside lock before spawning
-        - Placeholder ensures other threads see the reserved slot
-        - Placeholder is replaced with real process after spawn completes
+        """
+        Ensure the configured number of independent testing agents are running.
+        
+        Spawns testing agents up to self.testing_agent_ratio unless YOLO mode is enabled,
+        testing_agent_ratio is 0, there are no passing features yet, or the global
+        MAX_TOTAL_AGENTS limit is reached. Each testing agent independently retests
+        passing features and multiple testers may exercise the same feature concurrently.
+        Slots are reserved atomically to avoid races while spawning processes.
         """
         # Skip if testing is disabled
         if self.yolo_mode or self.testing_agent_ratio == 0:
@@ -489,18 +492,21 @@ class ParallelOrchestrator:
                 break  # Exit on failure to avoid infinite loop
 
     def start_feature(self, feature_id: int, resume: bool = False) -> tuple[bool, str]:
-        """Start a single coding agent for a feature.
-
-        Args:
-            feature_id: ID of the feature to start
-            resume: If True, resume a feature that's already in_progress from a previous session
-
+        """
+        Start a coding agent process for the specified feature, marking the feature as in-progress unless resuming.
+        
+        Parameters:
+            feature_id (int): ID of the feature to start.
+            resume (bool): If True, only allow starting if the feature is already marked in-progress from a prior run.
+        
+        Behavior:
+        - Validates feature existence and that it is not already complete.
+        - Enforces per-orchestrator concurrency and a global total-agent cap before starting.
+        - If `resume` is False, marks the feature as `in_progress` in the database before spawning the agent; if the agent spawn fails, the `in_progress` flag is cleared to avoid leaving the feature in a limbo state.
+        - On success, spawns the coding agent subprocess and registers it with the orchestrator. Testing agents are managed separately.
+        
         Returns:
-            Tuple of (success, message)
-
-        Transactional State Management:
-        - If spawn fails after marking in_progress, we rollback the database state
-        - This prevents features from getting stuck in a limbo state
+            tuple[bool, str]: `True` and a success message when the agent was started; `False` and an explanatory message otherwise.
         """
         with self._lock:
             if feature_id in self.running_coding_agents:
@@ -560,7 +566,17 @@ class ParallelOrchestrator:
         return True, f"Started feature {feature_id}"
 
     def _spawn_coding_agent(self, feature_id: int) -> tuple[bool, str]:
-        """Spawn a coding agent subprocess for a specific feature."""
+        """
+        Start a coding agent process for the given feature and register it with the orchestrator.
+        
+        On success this registers the subprocess in `running_coding_agents`, stores an abort event in
+        `abort_events`, launches a background thread to stream the agent's output, invokes the
+        `on_status` callback with `"running"` (if provided), and prints a start message. On failure the
+        feature's `in_progress` flag is cleared in the database before returning.
+        
+        Returns:
+            tuple[bool, str]: `(True, confirmation_message)` on successful spawn, `(False, error_message)` on failure.
+        """
         # Create abort event
         abort_event = threading.Event()
 
@@ -706,10 +722,13 @@ class ParallelOrchestrator:
         return True, f"Started testing agent for feature #{feature_id}"
 
     async def _run_initializer(self) -> bool:
-        """Run initializer agent as async subprocess.
-
-        Returns True if initialization succeeded (features were created).
-        Uses asyncio subprocess for non-blocking I/O.
+        """
+        Run the project initializer agent and stream its output to the orchestrator.
+        
+        Starts the initializer subprocess, forwards its stdout lines to the orchestrator's output callback (if set) and to stdout, enforces the INITIALIZER_TIMEOUT, and kills the process on timeout.
+        
+        Returns:
+            bool: `True` if the initializer completed successfully (exit code 0), `False` on timeout or non-zero exit code.
         """
         log_section(logger, "INITIALIZER PHASE")
         logger.info(f"[INIT] Starting initializer subprocess | project_dir={self.project_dir}")
@@ -743,6 +762,11 @@ class ParallelOrchestrator:
         # Stream output with timeout using native async I/O
         try:
             async def stream_output():
+                """
+                Read lines from the initializer subprocess stdout, print each decoded line, and forward them to the orchestrator's output callback.
+                
+                Each available line is decoded and printed to stdout; if `self.on_output` is set, it is invoked with feature id 0 and the line. After the stream ends, the coroutine waits for the subprocess to exit.
+                """
                 while True:
                     line = await proc.stdout.readline()
                     if not line:
@@ -778,7 +802,20 @@ class ParallelOrchestrator:
         abort: threading.Event,
         agent_type: Literal["coding", "testing"] = "coding",
     ):
-        """Read output from subprocess and emit events."""
+        """
+        Read a subprocess's stdout lines, forward them to the orchestrator, and finalize the agent when it exits.
+        
+        Reads lines from the subprocess stdout until the provided abort event is set or the stream ends. Each line is forwarded to the optional `on_output` callback (using `feature_id` or 0) or printed to stdout. After the subprocess exits, attempts to kill its process tree to remove any child processes, then notifies the orchestrator of agent completion.
+        
+        Parameters:
+            feature_id (int | None): Feature identifier associated with the agent; may be None for anonymous/testing agents.
+            proc (subprocess.Popen): The running subprocess whose output will be read.
+            abort (threading.Event): Event used to request early termination of output reading.
+            agent_type (Literal["coding", "testing"]): Human-readable tag used for logging and completion handling.
+        
+        Returns:
+            None
+        """
         try:
             for line in proc.stdout:
                 if abort.is_set():
@@ -821,15 +858,14 @@ class ParallelOrchestrator:
                 pass
 
     async def _wait_for_agent_completion(self, timeout: float = POLL_INTERVAL):
-        """Wait for an agent to complete or until timeout expires.
-
-        This replaces fixed `asyncio.sleep(POLL_INTERVAL)` calls with event-based
-        waiting. When an agent completes, _signal_agent_completed() sets the event,
-        causing this method to return immediately. If no agent completes within
-        the timeout, we return anyway to check for ready features.
-
-        Args:
-            timeout: Maximum seconds to wait (default: POLL_INTERVAL)
+        """
+        Waits until a running agent completes or the timeout elapses.
+        
+        Blocks until the internal agent-completed event is set or until `timeout` seconds pass.
+        If the event is set, it is cleared before returning.
+        
+        Parameters:
+            timeout (float): Maximum seconds to wait (default: POLL_INTERVAL).
         """
         if self._agent_completed_event is None:
             # Fallback if event not initialized (shouldn't happen in normal operation)
@@ -852,20 +888,16 @@ class ParallelOrchestrator:
         agent_type: Literal["coding", "testing"],
         proc: subprocess.Popen,
     ):
-        """Handle agent completion.
-
-        For coding agents:
-        - ALWAYS clears in_progress when agent exits, regardless of success/failure.
-        - This prevents features from getting stuck if an agent crashes or is killed.
-        - The agent marks features as passing BEFORE clearing in_progress, so this
-          is safe.
-
-        For testing agents:
-        - Remove from running dict (no claim to release - concurrent testing is allowed).
-
-        Process Cleanup:
-        - Ensures process is fully terminated before removing from tracking dict
-        - This prevents zombie processes from accumulating
+        """
+        Handle completion of a coding or testing agent process and update orchestrator state.
+        
+        For testing agents: remove the agent entry (including placeholder slots), log completion status, and signal the main loop that an agent slot is available.
+        
+        For coding agents: stop tracking the agent and its abort event, ensure the feature's in_progress flag is cleared if the feature did not reach passing, refresh the database connection so cross-process commits are visible, increment the feature's failure count on non-zero exit codes and stop retrying once MAX_FEATURE_RETRIES is reached, invoke the optional on_status callback with the final status, print/log the final status, and signal the main loop that an agent slot is available.
+        
+        Side effects:
+        - Ensures the subprocess is terminated and removed from internal tracking to avoid zombie processes.
+        - Commits to the database may be observed by recreating the engine/session after agent completion.
         """
         # Ensure process is fully terminated (should already be done by wait() in _read_output)
         if proc.poll() is None:
@@ -953,7 +985,11 @@ class ParallelOrchestrator:
         # not here when they complete. This ensures 1:1 ratio and proper termination.
 
     def stop_feature(self, feature_id: int) -> tuple[bool, str]:
-        """Stop a running coding agent and all its child processes."""
+        """
+        Stop a running coding agent and its child processes.
+        
+        Attempts to signal the agent to abort and kills its process tree. Returns a tuple (success, message): `True` if a stop was initiated, `False` if the feature was not running; `message` describes the outcome.
+        """
         with self._lock:
             if feature_id not in self.running_coding_agents:
                 return False, "Feature not running"
@@ -974,7 +1010,11 @@ class ParallelOrchestrator:
         return True, f"Stopped feature {feature_id}"
 
     def stop_all(self) -> None:
-        """Stop all running agents (coding and testing)."""
+        """
+        Stop all running agents and persist database state.
+        
+        Sets the orchestrator as not running, stops any active coding agents, attempts to terminate all active testing agent processes (skipping placeholder slots), and performs a WAL checkpoint to ensure database changes are persisted.
+        """
         self.is_running = False
 
         # Stop coding agents
@@ -1002,10 +1042,10 @@ class ParallelOrchestrator:
         self._cleanup_database()
 
     def _cleanup_database(self) -> None:
-        """Cleanup database connections and checkpoint WAL.
-
-        This ensures all database changes are persisted to the main database file
-        before exit, preventing corruption when multiple agents have been running.
+        """
+        Perform a WAL checkpoint and dispose the database engine to ensure on-disk persistence and release connections.
+        
+        Attempts to checkpoint the project's write-ahead log and logs whether the checkpoint succeeded. If an engine instance exists, disposes it to release pooled connections; any errors during disposal are logged.
         """
         logger.info("[CLEANUP] Starting database cleanup")
 
@@ -1045,10 +1085,12 @@ class ParallelOrchestrator:
 
     async def _run_initialization_phase(self) -> bool:
         """
-        Run initialization phase if no features exist.
-
+        Ensure the project has features by running the initializer when none are present.
+        
+        If no features exist for the configured project, runs the initializer agent, verifies that features were created, recreates the database connection so subsequent work sees the initializer's commits, and logs a brief post-initialization state.
+        
         Returns:
-            True if initialization succeeded or was not needed, False if failed.
+            True if initialization succeeded or was not needed, `False` otherwise.
         """
         if has_features(self.project_dir):
             return True
@@ -1102,11 +1144,11 @@ class ParallelOrchestrator:
 
     async def _handle_resumable_features(self, slots: int) -> bool:
         """
-        Handle resuming features from previous session.
-
-        Args:
-            slots: Number of available slots for new agents.
-
+        Resume features left in progress from a previous session up to the provided number of available slots.
+        
+        Parameters:
+            slots (int): Number of available agent slots to start resumable features.
+        
         Returns:
             True if any features were resumed, False otherwise.
         """
@@ -1192,12 +1234,10 @@ class ParallelOrchestrator:
             await self._wait_for_agent_completion(timeout=1.0)
 
     async def run_loop(self):
-        """Main orchestration loop.
-
-        This method coordinates multiple coding and testing agents:
-        1. Initialization phase: Run initializer if no features exist
-        2. Feature loop: Continuously spawn agents to work on features
-        3. Cleanup: Wait for all agents to complete
+        """
+        Run the orchestrator main loop to manage initialization, feature processing, and cleanup.
+        
+        Configures async signaling and logging, performs an optional initialization phase, drives the feature scheduling loop until no work remains, waits for all active agents to finish, and performs database cleanup.
         """
         self.is_running = True
 
@@ -1228,7 +1268,16 @@ class ParallelOrchestrator:
         print("Orchestrator finished.", flush=True)
 
     async def _run_feature_loop(self) -> None:
-        """Run the main feature processing loop."""
+        """
+        Orchestrates the main feature processing loop, driving feature resumption, scheduling, and lifecycle until work is finished.
+        
+        Runs until the orchestrator is stopped or all features are complete. While active it:
+        - Detects and reports features that can be resumed from a previous session.
+        - Ensures a steady set of testing agents are running.
+        - Schedules resumable features first, then ready features, respecting the configured concurrency limits.
+        - Waits for agent completion when capacity is reached and continues scheduling as capacity becomes available.
+        On unexpected errors the loop yields to pending agent completion before retrying or shutting down.
+        """
         # Check for features to resume from previous session
         resumable = self.get_resumable_features()
         if resumable:
@@ -1287,7 +1336,12 @@ class ParallelOrchestrator:
                 await self._wait_for_agent_completion()
 
     def _log_loop_iteration(self, loop_iteration: int) -> None:
-        """Log debug information for the current loop iteration."""
+        """
+        Emit periodic debug logs about the orchestrator loop status and, every fifth iteration (and on the first iteration), write a full database state dump.
+        
+        Parameters:
+            loop_iteration (int): Current loop iteration index used to determine logging frequency and when to perform the database dump.
+        """
         if loop_iteration <= 10 or loop_iteration % 5 == 0:
             with self._lock:
                 running_ids = list(self.running_coding_agents.keys())
@@ -1306,7 +1360,20 @@ class ParallelOrchestrator:
                     session.close()
 
     def get_status(self) -> dict:
-        """Get current orchestrator status."""
+        """
+        Return a snapshot of the orchestrator's current runtime state.
+        
+        Returns:
+            status (dict): Mapping with the following keys:
+                - "running_features": list[int] of feature IDs currently handled by coding agents.
+                - "coding_agent_count": int count of active coding agents.
+                - "testing_agent_count": int count of active testing agents (placeholders excluded).
+                - "count": int legacy alias for `coding_agent_count`.
+                - "max_concurrency": int configured maximum concurrent coding agents.
+                - "testing_agent_ratio": int configured number of testing agents to maintain.
+                - "is_running": bool indicating whether the orchestrator loop is active.
+                - "yolo_mode": bool indicating whether regression testing is disabled.
+        """
         with self._lock:
             return {
                 "running_features": list(self.running_coding_agents.keys()),
@@ -1353,7 +1420,13 @@ async def run_parallel_orchestrator(
 
 
 def main():
-    """Main entry point for parallel orchestration."""
+    """
+    Run the Parallel Feature Orchestrator from the command line.
+    
+    Parses command-line arguments (project directory or registered project name, max concurrency, model, YOLO mode, and testing-agent ratio),
+    resolves the project path, and starts the orchestrator loop. Exits with a non-zero status if the project path cannot be resolved and
+    prints a message when interrupted by the user.
+    """
     import argparse
 
     from dotenv import load_dotenv

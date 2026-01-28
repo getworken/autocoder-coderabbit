@@ -38,7 +38,15 @@ ROOT_DIR = Path(__file__).parent.parent.parent
 
 
 def _get_project_path(project_name: str) -> Optional[Path]:
-    """Get project path from registry."""
+    """
+    Return the filesystem path of a registered project.
+    
+    Parameters:
+        project_name (str): Name of the project to look up.
+    
+    Returns:
+        Optional[Path]: Path to the project's root directory if found, otherwise None.
+    """
     import sys
     root = Path(__file__).parent.parent.parent
     if str(root) not in sys.path:
@@ -93,7 +101,15 @@ class SessionInfo(BaseModel):
 
 @router.get("/conversations/{project_name}", response_model=list[ConversationSummary])
 async def list_project_conversations(project_name: str):
-    """List all conversations for a project."""
+    """
+    List all conversations for the given project.
+    
+    Returns:
+        List[ConversationSummary]: Conversation summaries for the project.
+    
+    Raises:
+        HTTPException: 400 if `project_name` is invalid; 404 if the project does not exist.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -107,7 +123,20 @@ async def list_project_conversations(project_name: str):
 
 @router.get("/conversations/{project_name}/{conversation_id}", response_model=ConversationDetail)
 async def get_project_conversation(project_name: str, conversation_id: int):
-    """Get a specific conversation with all messages."""
+    """
+    Retrieve a conversation and its messages for the given project.
+    
+    Parameters:
+        project_name (str): Project identifier to look up.
+        conversation_id (int): Numeric ID of the conversation to retrieve.
+    
+    Returns:
+        ConversationDetail: Conversation metadata and a list of messages as ConversationMessageModel entries.
+    
+    Raises:
+        HTTPException: 400 if the project name is invalid.
+        HTTPException: 404 if the project or the conversation is not found.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -131,7 +160,18 @@ async def get_project_conversation(project_name: str, conversation_id: int):
 
 @router.post("/conversations/{project_name}", response_model=ConversationSummary)
 async def create_project_conversation(project_name: str):
-    """Create a new conversation for a project."""
+    """
+    Create a new conversation for the given project and return its summary.
+    
+    Parameters:
+        project_name (str): The project's registry name.
+    
+    Returns:
+        ConversationSummary: Summary of the newly created conversation (message_count is 0).
+    
+    Raises:
+        HTTPException: 400 if `project_name` is invalid; 404 if the project cannot be found.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -152,7 +192,20 @@ async def create_project_conversation(project_name: str):
 
 @router.delete("/conversations/{project_name}/{conversation_id}")
 async def delete_project_conversation(project_name: str, conversation_id: int):
-    """Delete a conversation."""
+    """
+    Delete a conversation for a given project.
+    
+    Parameters:
+        project_name (str): Name of the project containing the conversation.
+        conversation_id (int): Identifier of the conversation to delete.
+    
+    Returns:
+        dict: {"success": True, "message": "Conversation deleted"} on successful deletion.
+    
+    Raises:
+        HTTPException: 400 if the project name is invalid.
+        HTTPException: 404 if the project does not exist or the conversation is not found.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -179,7 +232,18 @@ async def list_active_sessions():
 
 @router.get("/sessions/{project_name}", response_model=SessionInfo)
 async def get_session_info(project_name: str):
-    """Get information about an active session."""
+    """
+    Retrieve information about the active session for a project.
+    
+    Parameters:
+        project_name (str): Project identifier to query.
+    
+    Returns:
+        SessionInfo: The active session's info containing `project_name`, `conversation_id`, and `is_active` set to `True`.
+    
+    Raises:
+        HTTPException: 400 if `project_name` is invalid; 404 if no active session exists for the project.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -196,7 +260,18 @@ async def get_session_info(project_name: str):
 
 @router.delete("/sessions/{project_name}")
 async def close_session(project_name: str):
-    """Close an active session."""
+    """
+    Close the active assistant session for the specified project.
+    
+    Parameters:
+        project_name (str): Name of the project whose session should be closed.
+    
+    Returns:
+        dict: {"success": True, "message": "Session closed"} on successful closure.
+    
+    Raises:
+        HTTPException: 400 if `project_name` is invalid; 404 if no active session exists for the project.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -215,22 +290,28 @@ async def close_session(project_name: str):
 @router.websocket("/ws/{project_name}")
 async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
     """
-    WebSocket endpoint for assistant chat.
-
-    Message protocol:
-
-    Client -> Server:
-    - {"type": "start", "conversation_id": int | null} - Start/resume session
-    - {"type": "message", "content": "..."} - Send user message
-    - {"type": "ping"} - Keep-alive ping
-
-    Server -> Client:
-    - {"type": "conversation_created", "conversation_id": int} - New conversation created
-    - {"type": "text", "content": "..."} - Text chunk from Claude
-    - {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
-    - {"type": "response_done"} - Response complete
-    - {"type": "error", "content": "..."} - Error message
-    - {"type": "pong"} - Keep-alive pong
+    Handle a WebSocket connection for assistant chat for the specified project.
+    
+    This endpoint accepts a persistent WebSocket and implements a simple JSON message protocol to start or resume conversations, forward user messages to the assistant, and stream assistant responses back to the client.
+    
+    Client -> Server messages:
+    - {"type": "start", "conversation_id": int | null} — start a new session or resume if conversation_id provided
+    - {"type": "resume", "conversation_id": int} — resume an existing conversation without sending the greeting
+    - {"type": "message", "content": "..."} — send user message to the assistant
+    - {"type": "ping"} — keep-alive ping
+    
+    Server -> Client messages:
+    - {"type": "conversation_created", "conversation_id": int} — confirms a conversation was created/resumed
+    - {"type": "text", "content": "..."} — text chunk from the assistant
+    - {"type": "tool_call", "tool": "...", "input": {...}} — assistant is invoking a tool
+    - {"type": "response_done"} — assistant finished its response
+    - {"type": "error", "content": "..."} — error description
+    - {"type": "pong"} — keep-alive pong
+    
+    Behavior notes:
+    - Invalid project names or missing project directories result in the connection being closed.
+    - Assistant responses are streamed as JSON chunks.
+    - On disconnect the server retains session state so the client may resume later.
     """
     # Check authentication if Basic Auth is enabled
     if not await reject_unauthenticated_websocket(websocket):

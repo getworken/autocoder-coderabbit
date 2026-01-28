@@ -137,7 +137,14 @@ def check_node() -> bool:
 
 
 def install_npm_deps() -> bool:
-    """Install npm dependencies if node_modules doesn't exist or is stale."""
+    """
+    Install npm dependencies for the UI when node_modules is missing or out of date.
+    
+    Determines whether installation is required (node_modules absent, empty, or older than package.json or package-lock.json) and runs `npm install` in the UI directory if needed.
+    
+    Returns:
+        True if dependencies are already installed or were installed successfully, False if package.json is missing or installation failed.
+    """
     node_modules = UI_DIR / "node_modules"
     package_json = UI_DIR / "package.json"
     package_lock = UI_DIR / "package-lock.json"

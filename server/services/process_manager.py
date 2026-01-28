@@ -223,20 +223,18 @@ class AgentProcessManager:
             return False
 
     def _remove_lock(self) -> None:
-        """Remove lock file."""
+        """
+        Remove the project's lock file if it exists.
+        
+        This performs a best-effort removal and does not validate lock ownership or contents; no error is raised if the lock file is already absent.
+        """
         self.lock_file.unlink(missing_ok=True)
 
     def _ensure_lock_removed(self) -> None:
         """
-        Ensure lock file is removed, with verification.
-
-        This is a more robust version of _remove_lock that:
-        1. Verifies the lock file content matches our process
-        2. Removes the lock even if it's stale
-        3. Handles edge cases like zombie processes
-
-        Should be called from multiple cleanup points to ensure
-        the lock is removed even if the primary cleanup path fails.
+        Ensure the per-project lock file is removed if it is owned by this manager or is stale.
+        
+        Reads and verifies the lock file content (supports "PID" and "PID:CREATE_TIME" formats) and removes the file when it belongs to this process, when the referenced PID no longer exists, when the referenced PID is not the agent process, or when the lock file is invalid or unreadable. Logs actions taken.
         """
         if not self.lock_file.exists():
             return
@@ -288,7 +286,14 @@ class AgentProcessManager:
             self.lock_file.unlink(missing_ok=True)
 
     async def _broadcast_output(self, line: str) -> None:
-        """Broadcast output line to all registered callbacks."""
+        """
+        Broadcast a single output line to all registered output callbacks.
+        
+        Each callback is awaited in turn; exceptions raised by callbacks are caught and do not stop delivery to remaining callbacks.
+        
+        Parameters:
+            line (str): The output line to deliver to each callback.
+        """
         with self._callbacks_lock:
             callbacks = list(self._output_callbacks)
 
@@ -359,17 +364,18 @@ class AgentProcessManager:
         testing_agent_ratio: int = 1,
     ) -> tuple[bool, str]:
         """
-        Start the agent as a subprocess.
-
-        Args:
-            yolo_mode: If True, run in YOLO mode (skip testing agents)
-            model: Model to use (e.g., claude-opus-4-5-20251101)
-            parallel_mode: DEPRECATED - ignored, always uses unified orchestrator
-            max_concurrency: Max concurrent coding agents (1-5, default 1)
-            testing_agent_ratio: Number of regression testing agents (0-3, default 1)
-
+        Start the agent subprocess for this project and begin streaming its output.
+        
+        Parameters:
+            yolo_mode (bool): If True, run in YOLO mode (skip testing agents).
+            model (str | None): Optional model identifier to pass to the orchestrator (e.g., "claude-opus-4-5-20251101").
+            parallel_mode (bool): Deprecated and ignored; the unified orchestrator is always used.
+            max_concurrency (int | None): Maximum concurrent coding agents (1-5). Defaults to 1 when None.
+            testing_agent_ratio (int): Number of regression testing agents to spawn (0-3, default 1).
+        
         Returns:
-            Tuple of (success, message)
+            tuple[bool, str]: `(True, "<message>")` if the agent started successfully (message includes PID),
+            `(False, "<reason>")` otherwise.
         """
         if self.status in ("running", "paused"):
             return False, f"Agent is already {self.status}"
@@ -453,12 +459,12 @@ class AgentProcessManager:
 
     async def stop(self) -> tuple[bool, str]:
         """
-        Stop the agent and all its child processes (SIGTERM then SIGKILL if needed).
-
-        CRITICAL: Kills entire process tree to prevent orphaned coding/testing agents.
-
+        Stop the agent subprocess and its entire child process tree.
+        
+        Ensures the output streaming task is cancelled, kills the process tree, removes the per-project lock robustly, and resets the manager's runtime state (status, process, start time and configuration flags). If the agent is already not running, attempts lock cleanup and returns a failure message.
+        
         Returns:
-            Tuple of (success, message)
+            (bool, str): `True` if the agent was stopped, `False` otherwise; second element is a human-readable message.
         """
         if not self.process or self.status == "stopped":
             # Even if we think we're stopped, ensure lock is cleaned up
@@ -505,10 +511,12 @@ class AgentProcessManager:
 
     async def pause(self) -> tuple[bool, str]:
         """
-        Pause the agent using psutil for cross-platform support.
-
+        Pause the running agent process and update the manager's status.
+        
+        If the agent process no longer exists, mark the manager as crashed and ensure the project's lock file is removed.
+        
         Returns:
-            Tuple of (success, message)
+            tuple[bool, str]: First element is `True` on successful pause and `False` otherwise; second element is a human-readable message describing the outcome.
         """
         if not self.process or self.status != "running":
             return False, "Agent is not running"
@@ -528,10 +536,12 @@ class AgentProcessManager:
 
     async def resume(self) -> tuple[bool, str]:
         """
-        Resume a paused agent.
-
+        Resume the manager's paused agent process.
+        
+        On success, sets the manager status to "running". If the agent process no longer exists, sets the manager status to "crashed" and attempts to remove the lock file.
+        
         Returns:
-            Tuple of (success, message)
+            tuple: `True` and a success message on success; `False` and an error message otherwise.
         """
         if not self.process or self.status != "paused":
             return False, "Agent is not paused"

@@ -25,6 +25,15 @@ const IDE_OPTIONS: { id: IDEType; name: string; description: string }[] = [
   { id: 'antigravity', name: 'Antigravity', description: 'Claude-native development environment' },
 ]
 
+/**
+ * Render a modal that lets the user choose an IDE and optionally remember that choice.
+ *
+ * @param isOpen - Whether the modal is visible
+ * @param onClose - Called when the modal is closed or the Cancel action is triggered
+ * @param onSelect - Called with the selected IDE and the remember flag when the user confirms
+ * @param isLoading - When true, disables interactions and shows a loading state
+ * @returns The rendered IDE selection modal element
+ */
 export function IDESelectionModal({ isOpen, onClose, onSelect, isLoading }: IDESelectionModalProps) {
   const [selectedIDE, setSelectedIDE] = useState<IDEType | null>(null)
   const [rememberChoice, setRememberChoice] = useState(true)

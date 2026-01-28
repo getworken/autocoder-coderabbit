@@ -30,23 +30,27 @@ INITIAL_RETRY_DELAY_MS = 100
 
 
 def _utc_now() -> datetime:
-    """Return current UTC time."""
+    """
+    Return the current UTC datetime with timezone information.
+    
+    Returns:
+        datetime: Current UTC datetime with tzinfo set to UTC.
+    """
     return datetime.now(timezone.utc)
 
 
 def _commit_with_retry(session: Session, max_retries: int = MAX_COMMIT_RETRIES) -> None:
     """
-    Commit a session with retry logic for transient errors.
-
-    Handles SQLITE_BUSY, SQLITE_LOCKED, and similar transient errors
-    with exponential backoff.
-
-    Args:
-        session: SQLAlchemy session to commit
-        max_retries: Maximum number of retry attempts
-
+    Commit the given SQLAlchemy session, retrying transient database lock/busy errors with exponential backoff.
+    
+    This function attempts to commit the session and, on transient OperationalError messages containing "locked" or "busy", retries the commit up to `max_retries` times with an exponentially increasing delay, rolling back the session between attempts. Logs warnings on intermediate retries and logs an error before re-raising the final error if all attempts fail.
+    
+    Parameters:
+        session (Session): SQLAlchemy session to commit.
+        max_retries (int): Maximum number of retry attempts (default defined by module constant).
+    
     Raises:
-        OperationalError: If commit fails after all retries
+        OperationalError: If the commit fails after all retry attempts.
     """
     delay_ms = INITIAL_RETRY_DELAY_MS
     last_error = None
@@ -117,10 +121,11 @@ class FeatureRepository:
         return self.session.query(Feature).all()
 
     def get_all_ordered_by_priority(self) -> list[Feature]:
-        """Get all features ordered by priority (lowest first).
-
+        """
+        Return all Feature records ordered by priority (lowest first).
+        
         Returns:
-            List of Feature objects ordered by priority.
+            List of Feature objects ordered by ascending priority.
         """
         return self.session.query(Feature).order_by(Feature.priority).all()
 
@@ -155,26 +160,29 @@ class FeatureRepository:
         return self.session.query(Feature).filter(Feature.passes == True).all()
 
     def get_passing_count(self) -> int:
-        """Get count of passing features.
-
+        """
+        Return the number of features with `passes` set to True.
+        
         Returns:
-            Number of passing features.
+            count (int): The number of features where `passes` is True.
         """
         return self.session.query(Feature).filter(Feature.passes == True).count()
 
     def get_in_progress(self) -> list[Feature]:
-        """Get all features currently in progress.
-
+        """
+        Retrieve all features that are currently marked as in progress.
+        
         Returns:
-            List of Feature objects that are in progress.
+            list[Feature]: Features whose `in_progress` attribute is set to True.
         """
         return self.session.query(Feature).filter(Feature.in_progress == True).all()
 
     def get_pending(self) -> list[Feature]:
-        """Get features that are not passing and not in progress.
-
+        """
+        Return features that are neither passing nor in progress.
+        
         Returns:
-            List of pending Feature objects.
+            list[Feature]: Features with `passes` == False and `in_progress` == False.
         """
         return self.session.query(Feature).filter(
             Feature.passes == False,
@@ -182,18 +190,20 @@ class FeatureRepository:
         ).all()
 
     def get_non_passing(self) -> list[Feature]:
-        """Get all features that are not passing.
-
+        """
+        List features that are not passing.
+        
         Returns:
-            List of non-passing Feature objects.
+            list[Feature]: Feature objects whose `passes` attribute is False.
         """
         return self.session.query(Feature).filter(Feature.passes == False).all()
 
     def get_max_priority(self) -> Optional[int]:
-        """Get the maximum priority value.
-
+        """
+        Return the highest priority value among all Feature records.
+        
         Returns:
-            Maximum priority value or None if no features exist.
+            The highest priority value as an int, or `None` if no features exist.
         """
         feature = self.session.query(Feature).order_by(Feature.priority.desc()).first()
         return feature.priority if feature else None
@@ -203,16 +213,17 @@ class FeatureRepository:
     # ========================================================================
 
     def mark_in_progress(self, feature_id: int) -> Optional[Feature]:
-        """Mark a feature as in progress.
-
-        Args:
-            feature_id: The feature ID to update.
-
+        """
+        Mark the specified feature as in progress.
+        
+        Parameters:
+            feature_id (int): ID of the feature to mark as in progress.
+        
         Returns:
-            Updated Feature or None if not found.
-
-        Note:
-            Uses retry logic to handle transient database errors.
+            Feature | None: The updated Feature instance, or `None` if no feature with the given ID exists.
+        
+        Notes:
+            Commits use retry logic to handle transient database errors.
         """
         feature = self.get_by_id(feature_id)
         if feature and not feature.passes and not feature.in_progress:
@@ -223,17 +234,16 @@ class FeatureRepository:
         return feature
 
     def mark_passing(self, feature_id: int) -> Optional[Feature]:
-        """Mark a feature as passing.
-
-        Args:
-            feature_id: The feature ID to update.
-
+        """
+        Mark the feature identified by `feature_id` as passing and persist the change.
+        
+        This sets `passes` to `True`, clears `in_progress`, and updates `completed_at` to the current UTC time; the change is persisted (with retry on transient database errors) and the returned object is refreshed from the session.
+        
+        Parameters:
+            feature_id (int): ID of the Feature to mark as passing.
+        
         Returns:
-            Updated Feature or None if not found.
-
-        Note:
-            Uses retry logic to handle transient database errors.
-            This is a critical operation - the feature completion must be persisted.
+            Feature | None: The updated Feature instance if found, `None` if no Feature with `feature_id` exists.
         """
         feature = self.get_by_id(feature_id)
         if feature:
@@ -266,16 +276,16 @@ class FeatureRepository:
         return feature
 
     def clear_in_progress(self, feature_id: int) -> Optional[Feature]:
-        """Clear the in-progress flag on a feature.
-
-        Args:
-            feature_id: The feature ID to update.
-
+        """
+        Clear the in_progress flag for the feature with the given id.
+        
+        If the feature exists, sets its `in_progress` attribute to False, commits the change using the repository's retry logic, and refreshes the instance.
+        
+        Parameters:
+            feature_id (int): ID of the feature to update.
+        
         Returns:
-            Updated Feature or None if not found.
-
-        Note:
-            Uses retry logic to handle transient database errors.
+            The updated `Feature` instance if found, otherwise `None`.
         """
         feature = self.get_by_id(feature_id)
         if feature:
@@ -289,15 +299,13 @@ class FeatureRepository:
     # ========================================================================
 
     def get_ready_features(self) -> list[Feature]:
-        """Get features that are ready to implement.
-
-        A feature is ready if:
-        - Not passing
-        - Not in progress
-        - All dependencies are passing
-
+        """
+        Return features that are ready to implement.
+        
+        A feature is ready when it is not passing, not in progress, and every dependency id is in the set of passing feature ids.
+        
         Returns:
-            List of ready Feature objects.
+            list[Feature]: Features that meet the readiness criteria.
         """
         passing_ids = self.get_passing_ids()
         candidates = self.get_pending()
@@ -311,11 +319,13 @@ class FeatureRepository:
         return ready
 
     def get_blocked_features(self) -> list[tuple[Feature, list[int]]]:
-        """Get features blocked by unmet dependencies.
-
+        """
+        Return features that are currently blocked due to unmet dependencies.
+        
+        Each item is a tuple (feature, blocking_ids) where blocking_ids is a list of dependency feature IDs that are not passing.
+        
         Returns:
-            List of tuples (feature, blocking_ids) where blocking_ids
-            are the IDs of features that are blocking this one.
+            blocked (list[tuple[Feature, list[int]]]): Features with at least one unmet dependency and the IDs of those blocking dependencies.
         """
         passing_ids = self.get_passing_ids()
         candidates = self.get_non_passing()

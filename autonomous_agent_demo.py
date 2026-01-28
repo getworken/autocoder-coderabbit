@@ -56,10 +56,12 @@ from registry import DEFAULT_MODEL, get_project_path
 
 def safe_asyncio_run(coro):
     """
-    Run an async coroutine with proper cleanup to avoid Windows subprocess errors.
-
-    On Windows, subprocess transports may raise 'Event loop is closed' errors
-    during garbage collection if not properly cleaned up.
+    Run the given coroutine and ensure asyncio resources are cleaned up on Windows to avoid subprocess-related "Event loop is closed" errors.
+    
+    On Windows this function creates and runs a dedicated event loop and performs additional cleanup (cancelling pending tasks, awaiting their completion, shutting down async generators and the default executor) before closing the loop. On other platforms it delegates to asyncio.run.
+    
+    Returns:
+        The value returned by the awaited coroutine.
     """
     if sys.platform == "win32":
         loop = asyncio.new_event_loop()
@@ -87,7 +89,21 @@ def safe_asyncio_run(coro):
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+    """
+    Parse command-line arguments for the Autonomous Coding Agent Demo.
+    
+    Configures the CLI for orchestrator and subprocess modes and supports:
+      - project selection via --project-dir (required)
+      - run limits via --max-iterations
+      - model selection via --model
+      - rapid prototyping via --yolo
+      - concurrency control via --concurrency / -c (deprecated alias: --parallel / -p)
+      - targeted operation via --feature-id, --agent-type, and --testing-feature-id
+      - testing configuration via --testing-ratio
+    
+    Returns:
+        argparse.Namespace: The parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser(
         description="Autonomous Coding Agent Demo - Unified orchestrator pattern",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -198,7 +214,11 @@ Authentication:
 
 
 def main() -> None:
-    """Main entry point."""
+    """
+    Start the CLI, resolve the target project path, and launch the appropriate autonomous agent workflow.
+    
+    Parses command-line arguments, maps a deprecated `--parallel` value to `--concurrency`, and resolves `project_dir` either as an absolute filesystem path or by looking up a registered project name. If `--agent-type` is provided, runs the specified agent role (using `max_iterations=1` when not supplied); otherwise launches the unified parallel orchestrator after clamping concurrency to the range 1–5. Execution of async workflows is delegated to `safe_asyncio_run`. On user interrupt, prints a short resume guidance; on other exceptions, prints a fatal error message and re-raises.
+    """
     print("[ENTRY] autonomous_agent_demo.py starting...", flush=True)
     args = parse_args()
 
