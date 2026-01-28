@@ -28,13 +28,12 @@ from security import bash_security_hook
 @contextmanager
 def temporary_home(home_path):
     """
-    Context manager to temporarily set HOME (and Windows equivalents).
-
-    Saves original environment variables and restores them on exit,
-    even if an exception occurs.
-
-    Args:
-        home_path: Path to use as temporary home directory
+    Temporarily set the process home directory environment variables for the duration of a context.
+    
+    This context manager sets HOME (and on Windows, USERPROFILE and, if available, HOMEDRIVE/HOMEPATH) to the provided path for the lifetime of the context. On exit it restores the previous environment values; keys that did not exist before entering the context are removed. Restoration occurs even if the context body raises an exception.
+    
+    Parameters:
+        home_path (str or pathlib.Path): Path to use as the temporary home directory.
     """
     # Save original values for Unix and Windows
     saved_env = {
@@ -70,7 +69,14 @@ def temporary_home(home_path):
 
 
 def test_blocked_command_via_hook():
-    """Test that hardcoded blocked commands are rejected by the security hook."""
+    """
+    Validate that the Bash security hook rejects hardcoded blocked commands (for example, `sudo`).
+    
+    Runs the hook against a minimal project configuration and asserts that a command known to be disallowed is blocked.
+    
+    Returns:
+        bool: `True` if the hook decision is `"block"`, `False` otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 1: Hardcoded blocked command (sudo)")
     print("=" * 70)
@@ -105,7 +111,12 @@ def test_blocked_command_via_hook():
 
 
 def test_allowed_command_via_hook():
-    """Test that default allowed commands work."""
+    """
+    Verify that the Bash security hook permits the `ls` command by default.
+    
+    Returns:
+        bool: True if the hook decision is not "block" (ls allowed), False otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 2: Default allowed command (ls)")
     print("=" * 70)
@@ -170,7 +181,14 @@ def test_non_allowed_command_via_hook():
 
 
 def test_project_config_allows_command():
-    """Test that adding a command to project config allows it."""
+    """
+    Verify that a command listed in the project's allowed_commands.yaml is permitted by the Bash security hook.
+    
+    Creates a temporary project configuration that includes `swift` in the allowed commands and asserts the hook does not block `swift --version`.
+    
+    Returns:
+        bool: `True` if the hook permits the command, `False` if it blocks it.
+    """
     print("\n" + "=" * 70)
     print("TEST 4: Project config allows command (swift)")
     print("=" * 70)
@@ -205,7 +223,14 @@ commands:
 
 
 def test_pattern_matching():
-    """Test that wildcard patterns work correctly."""
+    """
+    Verify that wildcard patterns in a project's allowed_commands.yaml match command names (e.g., 'swift*' matches 'swiftlint').
+    
+    Runs the bash security hook using a temporary project config containing a pattern and checks whether a command matching that pattern is permitted.
+    
+    Returns:
+        True if the command matched the pattern and was allowed, False otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 5: Pattern matching (swift*)")
     print("=" * 70)
@@ -238,7 +263,14 @@ commands:
 
 
 def test_org_blocklist_enforcement():
-    """Test that org-level blocked commands cannot be overridden."""
+    """
+    Verify that organization-level blocked commands cannot be overridden by a project's allowed_commands configuration.
+    
+    Runs an integration scenario where an org config blocks specific commands (e.g., `terraform`), a project attempts to allow the same command, and the bash security hook is invoked. The test passes when the hook decision is `"block"` for the blocked command.
+    
+    Returns:
+        bool: `True` if the security hook blocks the command (test passes), `False` otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 6: Org blocklist enforcement (terraform)")
     print("=" * 70)
@@ -286,7 +318,12 @@ commands:
 
 
 def test_org_allowlist_inheritance():
-    """Test that org-level allowed commands are available to projects."""
+    """
+    Verify that organization-level allowed commands are inherited by a project.
+    
+    Returns:
+        bool: `True` if the command `jq '.data'` is permitted via the org config, `False` otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 7: Org allowlist inheritance (jq)")
     print("=" * 70)
@@ -327,7 +364,14 @@ blocked_commands: []
 
 
 def test_invalid_yaml_ignored():
-    """Test that invalid YAML config is safely ignored."""
+    """
+    Verify that an invalid project allowed_commands.yaml is ignored and the default allowlist is used.
+    
+    Creates a temporary project containing malformed YAML and invokes the Bash security hook with the command "ls". The test passes if the hook does not block the command.
+    
+    Returns:
+        bool: True if the hook did not block "ls" (invalid YAML ignored), False otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 8: Invalid YAML safely ignored")
     print("=" * 70)
@@ -356,7 +400,14 @@ def test_invalid_yaml_ignored():
 
 
 def test_100_command_limit():
-    """Test that configs with >100 commands are rejected."""
+    """
+    Verify that an allowed_commands.yaml containing more than 100 entries is rejected by the Bash security hook.
+    
+    Creates a temporary project config with 101 command entries and invokes the hook expecting a "block" decision.
+    
+    Returns:
+        bool: `True` if the hook blocks the command (indicating the config was rejected), `False` otherwise.
+    """
     print("\n" + "=" * 70)
     print("TEST 9: 100 command limit enforced")
     print("=" * 70)
@@ -390,6 +441,14 @@ def test_100_command_limit():
 
 
 def main():
+    """
+    Run the security integration test suite and report pass/fail results.
+    
+    Executes a predefined set of integration tests for the Bash security hook, printing per-test failures (including exceptions) and a final summary. Tests are run sequentially; successes and failures are counted and displayed.
+    
+    Returns:
+        exit_code (int): 0 if all tests passed, 1 if any test failed.
+    """
     print("=" * 70)
     print("  SECURITY INTEGRATION TESTS")
     print("=" * 70)

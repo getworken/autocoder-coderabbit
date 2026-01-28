@@ -46,7 +46,17 @@ DEFAULT_MAX_OUTPUT_TOKENS = "131072"
 
 async def _make_multimodal_message(content_blocks: list[dict]) -> AsyncGenerator[dict, None]:
     """
-    Create an async generator that yields a properly formatted multimodal message.
+    Constructs a single multimodal user message as an async generator suitable for sending to the Claude client.
+    
+    Parameters:
+        content_blocks (list[dict]): A list of content block objects (e.g., text and image blocks) that make up the multimodal message payload.
+    
+    Returns:
+        AsyncGenerator[dict, None]: An async generator that yields one dictionary with the messaging envelope:
+            - `type`: "user"
+            - `message`: {"role": "user", "content": content_blocks}
+            - `parent_tool_use_id`: None
+            - `session_id`: "default"
     """
     yield {
         "type": "user",
@@ -83,11 +93,13 @@ class ExpandChatSession:
 
     def __init__(self, project_name: str, project_dir: Path):
         """
-        Initialize the session.
-
-        Args:
-            project_name: Name of the project being expanded
-            project_dir: Absolute path to the project directory
+        Create a new ExpandChatSession and initialize its internal state.
+        
+        Parameters:
+            project_name (str): The name of the project being expanded.
+            project_dir (Path): Absolute path to the project directory.
+        
+        The constructor initializes session fields used during an expansion conversation, including the Claude client placeholder, message history, completion flag and timestamp, conversation and client-entered state, counters and IDs for created features, temporary file path holders for security/settings and MCP config, and an asyncio lock to serialize queries.
         """
         self.project_name = project_name
         self.project_dir = project_dir
@@ -104,7 +116,11 @@ class ExpandChatSession:
         self._query_lock = asyncio.Lock()
 
     async def close(self) -> None:
-        """Clean up resources and close the Claude client."""
+        """
+        Close the session and remove any temporary resources created for it.
+        
+        Performs a best-effort shutdown of the Claude client (if active) and removes temporary files created for the session, including the security settings file and the MCP config file. Errors during cleanup are logged but not raised.
+        """
         if self.client and self._client_entered:
             try:
                 await self.client.__aexit__(None, None, None)
@@ -130,9 +146,12 @@ class ExpandChatSession:
 
     async def start(self) -> AsyncGenerator[dict, None]:
         """
-        Initialize session and get initial greeting from Claude.
-
-        Yields message chunks as they stream in.
+        Initialize an expansion session, prepare per-session security and MCP configuration, start the Claude client, and stream the initial response.
+        
+        This creates temporary per-session security settings and MCP config files, instantiates and enters a Claude SDK client configured for the project, sends the initial "Begin the project expansion process." prompt, and yields response chunks as they stream in. On success a final message with {"type": "response_done"} is yielded. On failure the generator yields error event dictionaries describing the problem (e.g., missing skill file, missing app_spec.txt, missing Claude CLI, or client initialization/connection failures).
+        
+        Returns:
+            AsyncGenerator[dict, None]: Generator that yields message dictionaries representing streamed text chunks, feature creation events, error events, and a final response_done marker.
         """
         # Load the expand-project skill
         skill_path = ROOT_DIR / ".claude" / "commands" / "expand-project.md"
@@ -314,9 +333,22 @@ class ExpandChatSession:
         attachments: list[ImageAttachment] | None = None
     ) -> AsyncGenerator[dict, None]:
         """
-        Internal method to query Claude and stream responses.
-
-        Handles text responses and detects feature creation blocks.
+        Stream Claude responses for a single query and detect feature-creation results from MCP tool outputs or inline XML blocks.
+        
+        Sends the provided message (and optional image attachments) to the Claude client, streams assistant text chunks as they arrive, logs them to the session history, and detects feature creation results via:
+        - MCP tool outputs (preferred): yields a `features_created` event with source `"mcp"` when a `feature_create_bulk` tool result is found and successfully parsed.
+        - XML fallback: parses `<features_to_create>` JSON blocks from the accumulated response and, if any deduplicated features are found and created in the database, yields a `features_created` event with source `"xml_parsing"`.
+        If feature creation via the MCP tool succeeds, XML fallback parsing is skipped.
+        
+        Parameters:
+            message (str): The text message to send to Claude. May be empty when only attachments are provided.
+            attachments (list[ImageAttachment] | None): Optional list of image attachments; each attachment will be sent as a multimodal image block alongside the message.
+        
+        Returns:
+            AsyncGenerator[dict, None]: Yields event dictionaries during streaming. Known event shapes:
+              - {"type": "text", "content": "<assistant chunk>"}: assistant text fragments as they stream.
+              - {"type": "features_created", "count": <int>, "features": <list[dict]>, "source": "mcp"|"xml_parsing"}: one or more features created, with `source` indicating how they were discovered/created.
+              - {"type": "error", "content": "<message>"}: emitted if feature creation via XML fallback fails.
         """
         if not self.client:
             return
@@ -471,17 +503,19 @@ class ExpandChatSession:
 
     async def _create_features_bulk(self, features: list[dict]) -> list[dict]:
         """
-        Create features directly in the database.
-
-        Args:
-            features: List of feature dictionaries with category, name, description, steps
-
+        Persist multiple feature definitions into the project's database.
+        
+        Persists each input feature as a new Feature row, assigning sequential priority values starting one greater than the current maximum priority. Uses a flush to populate database-generated IDs before committing and rolls back then re-raises on error.
+        
+        Parameters:
+            features (list[dict]): Feature objects to create. Each dict may include keys:
+                - "category" (str): Feature category (defaults to "functional").
+                - "name" (str): Feature name (defaults to "Unnamed feature").
+                - "description" (str): Feature description.
+                - "steps" (list): Acceptance or implementation steps.
+        
         Returns:
-            List of created feature dictionaries with IDs
-
-        Note:
-            Uses flush() to get IDs immediately without re-querying by priority range,
-            which could pick up rows from concurrent writers.
+            list[dict]: Created feature summaries containing "id", "name", and "category".
         """
         # Import database classes
         import sys

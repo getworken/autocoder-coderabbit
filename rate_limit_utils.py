@@ -25,19 +25,15 @@ RATE_LIMIT_PATTERNS = [
 
 def parse_retry_after(error_message: str) -> Optional[int]:
     """
-    Extract retry-after seconds from various error message formats.
-
-    Handles common formats:
-    - "Retry-After: 60"
-    - "retry after 60 seconds"
-    - "try again in 5 seconds"
-    - "30 seconds remaining"
-
-    Args:
-        error_message: The error message to parse
-
+    Extracts a retry-after duration in seconds from an error message.
+    
+    Supports common textual formats such as "Retry-After: 60", "try again in 5 seconds", and "30 seconds remaining".
+    
+    Parameters:
+        error_message (str): The error message to inspect.
+    
     Returns:
-        Seconds to wait, or None if not parseable.
+        int | None: The number of seconds extracted from the message, or `None` if no duration is found.
     """
     patterns = [
         r"retry.?after[:\s]+(\d+)\s*(?:seconds?)?",
@@ -55,15 +51,12 @@ def parse_retry_after(error_message: str) -> Optional[int]:
 
 def is_rate_limit_error(error_message: str) -> bool:
     """
-    Detect if an error message indicates a rate limit.
-
-    Checks against common rate limit patterns from various API providers.
-
-    Args:
-        error_message: The error message to check
-
+    Determine whether an error message indicates a rate limit.
+    
+    Checks the message against known rate-limit indicator phrases.
+    
     Returns:
-        True if the message indicates a rate limit, False otherwise.
+        `true` if the message indicates a rate limit, `false` otherwise.
     """
     error_lower = error_message.lower()
     return any(pattern in error_lower for pattern in RATE_LIMIT_PATTERNS)

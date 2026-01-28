@@ -38,6 +38,16 @@ interface DebugLogViewerProps {
 
 type LogLevel = 'error' | 'warn' | 'debug' | 'info'
 
+/**
+ * A fixed, resizable bottom panel that displays real-time agent and dev-server logs and hosts managed terminals in separate tabs.
+ *
+ * Persists the panel height and selected tab to localStorage, auto-scrolls each log view unless the user scrolls up, and fetches/manages terminals for the current project.
+ *
+ * @param onHeightChange - Optional callback invoked with the panel height when the panel is open and the height changes
+ * @param activeTab - Optional controlled active tab ('agent' | 'devserver' | 'terminal'); when omitted the component manages active tab internally and persists it to localStorage
+ * @param onTabChange - Optional callback called when the active tab changes
+ * @returns The rendered DebugLogViewer React element
+ */
 export function DebugLogViewer({
   logs,
   devLogs,

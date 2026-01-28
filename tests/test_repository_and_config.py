@@ -135,7 +135,9 @@ class TestFeatureRepository:
             session.close()
 
     def test_get_pending(self, populated_db: Path):
-        """Test getting pending features (not passing, not in progress)."""
+        """
+        Verify the repository returns features that are neither passing nor in progress.
+        """
         from api.database import create_database
         from api.feature_repository import FeatureRepository
 
@@ -316,7 +318,11 @@ class TestAutocoderConfig:
     """Tests for the AutocoderConfig class."""
 
     def test_default_values(self, monkeypatch, tmp_path):
-        """Test that default values are loaded correctly."""
+        """
+        Verify AutocoderConfig loads expected defaults when no .env file or relevant environment variables are present.
+        
+        Constructs AutocoderConfig with _env_file=None and asserts default values for playwright_browser, playwright_headless, api_timeout_ms, and anthropic_default_sonnet_model.
+        """
         # Change to a directory without .env file
         monkeypatch.chdir(tmp_path)
 

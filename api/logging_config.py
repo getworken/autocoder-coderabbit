@@ -47,18 +47,16 @@ def setup_logging(
     root_level: int = DEFAULT_LOG_LEVEL,
 ) -> None:
     """
-    Configure logging for the Autocoder application.
-
-    Sets up:
-    - RotatingFileHandler for detailed logs (DEBUG level)
-    - StreamHandler for console output (INFO level by default)
-
-    Args:
-        log_dir: Directory for log files (default: ./logs/)
-        log_file: Name of the log file
-        console_level: Log level for console output
-        file_level: Log level for file output
-        root_level: Root logger level
+    Configure global logging for the Autocoder application.
+    
+    Sets up a rotating file handler and a console handler, reduces noise from common third-party libraries, and is a no-op if logging has already been configured.
+    
+    Parameters:
+        log_dir (Optional[Path]): Directory where log files will be written. Defaults to the module's DEFAULT_LOG_DIR if None.
+        log_file (str): Filename for the primary log file.
+        console_level (int): Log level for console output.
+        file_level (int): Log level for file output.
+        root_level (int): Log level for the root logger.
     """
     global _logging_configured
 
@@ -132,17 +130,14 @@ def setup_orchestrator_logging(
     session_id: Optional[str] = None,
 ) -> logging.Logger:
     """
-    Set up a dedicated logger for the orchestrator with a specific log file.
-
-    This creates a separate logger for orchestrator debug output that writes
-    to a dedicated file (replacing the old DebugLogger class).
-
-    Args:
-        log_file: Path to the orchestrator log file
-        session_id: Optional session identifier
-
+    Configure a dedicated "orchestrator" logger that writes to the provided rotating log file and does not propagate to the root logger.
+    
+    Parameters:
+        log_file (Path): Path to the orchestrator log file.
+        session_id (Optional[str]): Optional session identifier to record at session start.
+    
     Returns:
-        Configured logger for orchestrator use
+        logging.Logger: The configured orchestrator logger (level DEBUG, non-propagating).
     """
     logger = logging.getLogger("orchestrator")
     logger.setLevel(logging.DEBUG)
@@ -180,11 +175,11 @@ def setup_orchestrator_logging(
 
 def log_section(logger: logging.Logger, title: str) -> None:
     """
-    Log a section header for visual separation in log files.
-
-    Args:
-        logger: Logger instance
-        title: Section title
+    Log a visually distinct section header to the provided logger.
+    
+    Parameters:
+        logger (logging.Logger): Logger that will receive the header lines.
+        title (str): Title text displayed between separator lines.
     """
     logger.info("")
     logger.info("=" * 60)
@@ -195,12 +190,12 @@ def log_section(logger: logging.Logger, title: str) -> None:
 
 def log_key_value(logger: logging.Logger, message: str, **kwargs) -> None:
     """
-    Log a message with key-value pairs.
-
-    Args:
-        logger: Logger instance
-        message: Main message
-        **kwargs: Key-value pairs to log
+    Log a primary message followed by each provided key-value pair as indented info lines.
+    
+    Parameters:
+        logger (logging.Logger): Logger used to emit the messages.
+        message (str): Primary message to log.
+        **kwargs: Additional key-value pairs to log; each pair is emitted on its own indented line.
     """
     logger.info(message)
     for key, value in kwargs.items():

@@ -65,7 +65,14 @@ async def test_async_feature_creation(async_temp_db: Path):
 
 
 async def test_async_feature_query(populated_db: Path):
-    """Test querying features in an async context."""
+    """
+    Verify database queries return expected counts of passing and in-progress Feature records.
+    
+    Asserts that exactly two Feature rows have `passes == True` and exactly one Feature row has `in_progress == True` in the provided populated test database.
+    
+    Parameters:
+        populated_db (Path): Path to a populated temporary test database.
+    """
     from api.database import Feature, create_database
 
     _, SessionLocal = create_database(populated_db)
@@ -142,7 +149,11 @@ async def test_bash_security_hook_with_project_dir(temp_project_dir: Path):
 
 
 async def test_orchestrator_initialization(mock_project_dir: Path):
-    """Test ParallelOrchestrator async initialization."""
+    """
+    Verify that ParallelOrchestrator initializes with the specified project directory, concurrency, and mode.
+    
+    Asserts that `max_concurrency` equals 2, `yolo_mode` is True, and the orchestrator is not running (`is_running` is False).
+    """
     from parallel_orchestrator import ParallelOrchestrator
 
     orchestrator = ParallelOrchestrator(
@@ -192,7 +203,11 @@ async def test_orchestrator_all_complete_check(populated_db: Path):
 
 
 async def test_health_endpoint(async_client):
-    """Test the health check endpoint."""
+    """
+    Verify the /api/health endpoint returns HTTP 200 and a JSON body with "status" set to "healthy".
+    
+    Asserts the response status code is 200 and the `"status"` field in the JSON payload equals `"healthy"`.
+    """
     response = await async_client.get("/api/health")
     assert response.status_code == 200
     data = response.json()
@@ -240,7 +255,14 @@ async def test_concurrent_database_access(populated_db: Path):
     _, SessionLocal = create_database(populated_db)
 
     async def read_features():
-        """Simulate async database read."""
+        """
+        Read all Feature records from the database and return their count.
+        
+        Closes the database session before returning.
+        
+        Returns:
+            count (int): Number of Feature records found.
+        """
         session = SessionLocal()
         try:
             await asyncio.sleep(0.01)  # Simulate async work

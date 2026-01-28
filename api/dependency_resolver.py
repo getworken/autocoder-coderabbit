@@ -144,18 +144,16 @@ def get_blocking_dependencies(
 def would_create_circular_dependency(
     features: list[dict], source_id: int, target_id: int
 ) -> bool:
-    """Check if adding a dependency from target to source would create a cycle.
-
-    Uses iterative DFS with explicit stack to prevent stack overflow on deep
-    dependency graphs.
-
-    Args:
-        features: List of all feature dicts
-        source_id: The feature that would gain the dependency
-        target_id: The feature that would become a dependency
-
+    """
+    Determine whether adding a dependency from the feature with id `target_id` to the feature with id `source_id` would create a cycle.
+    
+    Parameters:
+        features (list[dict]): All feature objects (each must include an `"id"` and may include `"dependencies"`).
+        source_id (int): The id of the feature that would gain the dependency.
+        target_id (int): The id of the feature that would become a dependency.
+    
     Returns:
-        True if adding the dependency would create a cycle
+        bool: `True` if adding the dependency would create a cycle, `False` otherwise.
     """
     if source_id == target_id:
         return True  # Self-reference is a cycle
@@ -204,15 +202,21 @@ def would_create_circular_dependency(
 def validate_dependencies(
     feature_id: int, dependency_ids: list[int], all_feature_ids: set[int]
 ) -> tuple[bool, str]:
-    """Validate dependency list.
-
-    Args:
-        feature_id: ID of the feature being validated
-        dependency_ids: List of proposed dependency IDs
-        all_feature_ids: Set of all valid feature IDs
-
+    """
+    Validate a proposed list of dependency IDs for a feature.
+    
+    Parameters:
+        feature_id (int): ID of the feature being validated.
+        dependency_ids (list[int]): Proposed dependency IDs for the feature.
+        all_feature_ids (set[int]): Set of all existing feature IDs.
+    
     Returns:
-        Tuple of (is_valid, error_message)
+        tuple[bool, str]: (is_valid, error_message). `is_valid` is `True` when the dependency list passes all checks.
+        When invalid, `error_message` explains the failure, which may indicate:
+          - the dependency count exceeds the allowed maximum (MAX_DEPENDENCIES_PER_FEATURE),
+          - a self-dependency (feature depends on itself),
+          - one or more dependency IDs are missing from `all_feature_ids`,
+          - duplicate dependency IDs were provided.
     """
     # Security: Check limits
     if len(dependency_ids) > MAX_DEPENDENCIES_PER_FEATURE:
@@ -235,17 +239,15 @@ def validate_dependencies(
 
 
 def _detect_cycles(features: list[dict], feature_map: dict) -> list[list[int]]:
-    """Detect cycles using iterative DFS with explicit stack.
-
-    Converts the recursive DFS to iterative to prevent stack overflow
-    on deep dependency graphs.
-
-    Args:
-        features: List of features to check for cycles
-        feature_map: Map of feature_id -> feature dict
-
+    """
+    Identify all dependency cycles among the provided features.
+    
+    Parameters:
+        features (list[dict]): Iterable of feature dicts to inspect; each feature must include an "id" key.
+        feature_map (dict): Mapping from feature_id to its feature dict (used to look up a feature's "dependencies").
+    
     Returns:
-        List of cycles, where each cycle is a list of feature IDs
+        list[list[int]]: A list of cycles, where each cycle is represented as a list of feature IDs in cycle order.
     """
     cycles: list[list[int]] = []
     visited: set[int] = set()

@@ -37,6 +37,13 @@ import { Badge } from '@/components/ui/badge'
 const STORAGE_KEY = 'autocoder-selected-project'
 const VIEW_MODE_KEY = 'autocoder-view-mode'
 
+/**
+ * Root application component that manages project selection, feature orchestration, UI state, real-time agent status, and IDE integration.
+ *
+ * Renders the AutoCoder dashboard: header controls, project selector, progress and agent mission panels, Kanban or dependency graph views, modals (add feature, feature detail, expand project, spec creation, settings, IDE selection), assistant UI, debug log viewer, and celebration overlay. Persists selected project and view mode to localStorage, wires keyboard shortcuts, polls agent status via WebSocket, and triggers auxiliary side effects (feature sounds, celebrations, graph refresh).
+ *
+ * @returns The application's root JSX element.
+ */
 function App() {
   // Initialize selected project from localStorage
   const [selectedProject, setSelectedProject] = useState<string | null>(() => {

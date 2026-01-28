@@ -79,7 +79,18 @@ READONLY_BUILTIN_TOOLS = [
 
 
 def get_system_prompt(project_name: str, project_dir: Path) -> str:
-    """Generate the system prompt for the assistant with project context."""
+    """
+    Builds the system prompt presented to the assistant, incorporating project context and available tools.
+    
+    Reads the project's prompts/app_spec.txt (if present) and embeds its content into the prompt; if the file is larger than 5000 characters it will be truncated with a "(truncated)" note. If reading the file fails, a warning is logged and a placeholder stating no app specification is used in the prompt.
+    
+    Parameters:
+        project_name (str): The human-readable name of the project to include in the prompt.
+        project_dir (Path): Path to the project root; used to locate prompts/app_spec.txt.
+    
+    Returns:
+        str: A formatted system prompt describing the assistant's role, available read-only code analysis tools and MCP feature-management tools, and the project specification content or a placeholder if none was found.
+    """
     # Try to load app_spec.txt for context
     app_spec_content = ""
     app_spec_path = project_dir / "prompts" / "app_spec.txt"
@@ -233,7 +244,11 @@ class AssistantChatSession:
         self._history_loaded: bool = False  # Track if we've loaded history for resumed conversations
 
     async def close(self) -> None:
-        """Clean up resources and close the Claude client."""
+        """
+        Close the Claude client and release associated resources for this session.
+        
+        Attempts to asynchronously exit the underlying client context and logs a warning if an error occurs. After completion, clears the client reference and resets the internal entered flag.
+        """
         if self.client and self._client_entered:
             try:
                 await self.client.__aexit__(None, None, None)
@@ -245,14 +260,19 @@ class AssistantChatSession:
 
     async def start(self, skip_greeting: bool = False) -> AsyncGenerator[dict, None]:
         """
-        Initialize session with the Claude client.
-
-        Creates a new conversation if none exists, then sends an initial greeting.
-        For resumed conversations, skips the greeting since history is loaded from DB.
-        Yields message chunks as they stream in.
-
-        Args:
-            skip_greeting: If True, skip sending the greeting (for resuming conversations)
+        Initialize and connect the assistant session with the Claude client and prepare conversation context.
+        
+        Creates a new conversation if none exists, writes assistant permission and MCP config files, starts the Claude client, and yields event dictionaries for conversation lifecycle and streamed assistant output.
+        
+        Parameters:
+            skip_greeting (bool): If True, request to skip sending the greeting. Note: greeting behavior is determined by whether this is a new conversation; the greeting is only sent for newly created conversations.
+        
+        Returns:
+            AsyncGenerator[dict, None]: Yields dict events such as:
+                - {"type": "conversation_created", "conversation_id": int}
+                - {"type": "text", "content": str}
+                - {"type": "response_done"}
+                - {"type": "error", "content": str}
         """
         # Track if this is a new conversation (for greeting decision)
         is_new_conversation = self.conversation_id is None

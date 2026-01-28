@@ -8,6 +8,17 @@ interface ResetProjectModalProps {
   onReset?: () => void
 }
 
+/**
+ * Renders a modal that lets the user perform either a quick or full reset of a project.
+ *
+ * The modal shows explanatory details about what will be deleted or preserved for each mode,
+ * displays any error returned by the reset operation, and disables actions while the reset is pending.
+ *
+ * @param projectName - The name of the project being reset; displayed in the dialog.
+ * @param onClose - Callback invoked to close the modal.
+ * @param onReset - Optional callback invoked after a successful reset, before the modal is closed.
+ * @returns A React element representing the reset confirmation modal.
+ */
 export function ResetProjectModal({ projectName, onClose, onReset }: ResetProjectModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [fullReset, setFullReset] = useState(false)

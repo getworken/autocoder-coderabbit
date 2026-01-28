@@ -33,7 +33,12 @@ ROOT_DIR = Path(__file__).parent.parent.parent
 
 
 def _get_project_path(project_name: str) -> Path:
-    """Get project path from registry."""
+    """
+    Resolve the filesystem path for the given project name by querying the project registry.
+    
+    Returns:
+        Path: The filesystem path to the project's directory.
+    """
     import sys
     root = Path(__file__).parent.parent.parent
     if str(root) not in sys.path:
@@ -63,7 +68,17 @@ async def list_spec_sessions():
 
 @router.get("/sessions/{project_name}", response_model=SpecSessionStatus)
 async def get_session_status(project_name: str):
-    """Get status of a spec creation session."""
+    """
+    Return status information for the spec creation session for a given project.
+    
+    Returns:
+        SpecSessionStatus: Session activity state including `project_name`, `is_active`,
+        `is_complete`, and `message_count`.
+    
+    Raises:
+        HTTPException: 400 if `project_name` is invalid.
+        HTTPException: 404 if there is no active session for the specified project.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -81,7 +96,19 @@ async def get_session_status(project_name: str):
 
 @router.delete("/sessions/{project_name}")
 async def cancel_session(project_name: str):
-    """Cancel and remove a spec creation session."""
+    """
+    Cancel an active spec creation session for the given project.
+    
+    Parameters:
+        project_name (str): Name of the project whose spec creation session should be cancelled. Must be a valid project name.
+    
+    Returns:
+        dict: {"success": True, "message": "Session cancelled"} when a session was removed.
+    
+    Raises:
+        HTTPException: with status code 400 if `project_name` is invalid.
+        HTTPException: with status code 404 if there is no active session for `project_name`.
+    """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")
 
@@ -105,10 +132,20 @@ class SpecFileStatus(BaseModel):
 @router.get("/status/{project_name}", response_model=SpecFileStatus)
 async def get_spec_file_status(project_name: str):
     """
-    Get spec creation status by reading .spec_status.json from the project.
-
-    This is used for polling to detect when Claude has finished writing spec files.
-    Claude writes this status file as the final step after completing all spec work.
+    Return the spec creation status for the given project by reading the project's prompts/.spec_status.json file.
+    
+    Parameters:
+        project_name (str): Project identifier; must pass project name validation.
+    
+    Returns:
+        SpecFileStatus: Object describing whether the status file exists, the spec generation status
+        ("complete", "in_progress", "not_started", or "error"), optional feature_count and timestamp,
+        and a list of files_written.
+    
+    Raises:
+        HTTPException: 400 if the project name is invalid.
+        HTTPException: 404 if the project is not found in the registry or the project directory is missing.
+        HTTPException: 500 if an unexpected error occurs while reading or parsing the status file.
     """
     if not is_valid_project_name(project_name):
         raise HTTPException(status_code=400, detail="Invalid project name")

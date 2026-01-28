@@ -43,6 +43,14 @@ function setStoredConversationId(projectName: string, conversationId: number | n
   }
 }
 
+/**
+ * Displays the project assistant slide-over panel and manages the current conversation state for the specified project.
+ *
+ * @param projectName - Project identifier shown in the header and used to scope persisted conversation ID
+ * @param isOpen - Whether the panel is visible
+ * @param onClose - Callback invoked when the panel or backdrop is clicked to close it
+ * @returns The AssistantPanel React element
+ */
 export function AssistantPanel({ projectName, isOpen, onClose }: AssistantPanelProps) {
   // Load initial conversation ID from localStorage
   const [conversationId, setConversationId] = useState<number | null>(() =>

@@ -50,7 +50,12 @@ class StructuredLogEntry:
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """Convert to dictionary, excluding None values."""
+        """
+        Build a dictionary representation of the log entry, omitting fields that are unset or empty.
+        
+        Returns:
+            dict: Mapping with keys 'timestamp', 'level', and 'message', plus any of 'agent_id', 'feature_id', 'tool_name', 'duration_ms', and 'extra' when those fields are present.
+        """
         result = {
             "timestamp": self.timestamp,
             "level": self.level,
@@ -69,7 +74,12 @@ class StructuredLogEntry:
         return result
 
     def to_json(self) -> str:
-        """Convert to JSON string."""
+        """
+        Return a JSON string representing the structured log entry.
+        
+        Returns:
+            json_str (str): JSON-encoded object containing the entry's fields (timestamp, level, message, and any present metadata such as `agent_id`, `feature_id`, `tool_name`, `duration_ms`, and `extra`).
+        """
         return json.dumps(self.to_dict())
 
 
@@ -86,6 +96,14 @@ class StructuredLogHandler(logging.Handler):
         agent_id: Optional[str] = None,
         max_entries: int = 10000,
     ):
+        """
+        Initialize the StructuredLogHandler and ensure the SQLite backing store is ready.
+        
+        Parameters:
+            db_path (Path): Filesystem path to the SQLite database used to persist logs. The handler will create parent directories and initialize the database schema if needed.
+            agent_id (Optional[str]): Optional default agent identifier to attach to emitted log entries when a record does not supply one.
+            max_entries (int): Maximum number of log rows to retain in the database; older entries will be evicted when this limit is exceeded.
+        """
         super().__init__()
         self.db_path = db_path
         self.agent_id = agent_id
@@ -94,7 +112,11 @@ class StructuredLogHandler(logging.Handler):
         self._init_database()
 
     def _init_database(self) -> None:
-        """Initialize the SQLite database for logs."""
+        """
+        Initialize the on-disk SQLite logs database and ensure required schema and indexes exist.
+        
+        This method acquires the handler's internal lock, opens (or creates) the SQLite file at self.db_path, enables WAL journaling for concurrent readers/writers, creates the `logs` table with columns for structured log fields, and adds indexes on timestamp, level, agent_id, and feature_id. Commits changes and closes the connection.
+        """
         with self._lock:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -213,6 +235,17 @@ class StructuredLogger:
         agent_id: Optional[str] = None,
         console_output: bool = True,
     ):
+        """
+        Initialize the StructuredLogger for a project by preparing the project's SQLite logs database and attaching logging handlers.
+        
+        Parameters:
+            project_dir (Path): Root directory of the project; a database will be created at `<project_dir>/.autocoder/logs.db`.
+            agent_id (Optional[str]): Optional agent identifier to tag emitted logs and associate the DB handler with a specific agent.
+            console_output (bool): If True, attach a human-readable console StreamHandler in addition to the database-backed StructuredLogHandler.
+        
+        Side effects:
+            Ensures the `.autocoder` directory exists, creates/opens the SQLite log database, and configures an internal logger with a StructuredLogHandler and optional console handler.
+        """
         self.project_dir = Path(project_dir)
         self.agent_id = agent_id
         self.db_path = self.project_dir / ".autocoder" / "logs.db"
@@ -254,7 +287,17 @@ class StructuredLogger:
         duration_ms: Optional[int] = None,
         **extra,
     ) -> None:
-        """Internal logging method with structured data."""
+        """
+        Log a message with structured metadata attached.
+        
+        Parameters:
+            level (str): Log level name (e.g., "debug", "info", "warn", "error") used to select the logger method.
+            message (str): Human-readable log message.
+            feature_id (Optional[int]): Optional numeric identifier for a feature or operation.
+            tool_name (Optional[str]): Optional name of a tool or subsystem associated with the log.
+            duration_ms (Optional[int]): Optional duration in milliseconds related to the logged event.
+            **extra: Additional key/value pairs to include in the structured `extra` payload.
+        """
         record_extra = {
             "agent_id": self.agent_id,
             "feature_id": feature_id,
@@ -270,23 +313,62 @@ class StructuredLogger:
         )
 
     def debug(self, message: str, **kwargs) -> None:
-        """Log debug message."""
+        """
+        Log a message at the debug level with optional structured metadata.
+        
+        Parameters:
+            message (str): Human-readable log message.
+            **kwargs: Optional structured fields to attach to the log entry. Recognized keys include
+                `agent_id` (str), `feature_id` (int), `tool_name` (str), `duration_ms` (int), and any
+                additional keys which will be stored under the entry's `extra` payload.
+        """
         self._log("debug", message, **kwargs)
 
     def info(self, message: str, **kwargs) -> None:
-        """Log info message."""
+        """
+        Log an informational structured message for this logger.
+        
+        Parameters:
+            message (str): Human-readable message to record.
+            **kwargs: Optional structured metadata to attach to the log. Recognized keys:
+                - feature_id (int): Identifier for the feature or step.
+                - tool_name (str): Name of the tool or subsystem.
+                - duration_ms (int): Duration in milliseconds associated with the event.
+                - Any other keys will be included in the log's `extra` payload.
+        """
         self._log("info", message, **kwargs)
 
     def warn(self, message: str, **kwargs) -> None:
-        """Log warning message."""
+        """
+        Log a message at the warning level.
+        
+        Parameters:
+        	message (str): The message to log.
+        	**kwargs: Optional structured fields forwarded to the logger (e.g., agent_id, feature_id, tool_name, duration_ms, extra).
+        """
         self._log("warning", message, **kwargs)
 
     def warning(self, message: str, **kwargs) -> None:
-        """Log warning message (alias)."""
+        """
+        Log a warning-level message.
+        
+        Parameters:
+            message (str): Human-readable log message.
+            **kwargs: Optional structured fields to include with the log entry (e.g. `agent_id`, `feature_id`, `tool_name`, `duration_ms`, `extra`).
+        """
         self._log("warning", message, **kwargs)
 
     def error(self, message: str, **kwargs) -> None:
-        """Log error message."""
+        """
+        Log a message at the error level with optional structured metadata.
+        
+        Parameters:
+        	message (str): Human-readable log message.
+        	feature_id (Optional[int], in kwargs): Identifier for the feature emitting the log.
+        	tool_name (Optional[str], in kwargs): Name of the tool related to this log.
+        	duration_ms (Optional[int], in kwargs): Duration in milliseconds associated with the event.
+        	extra (dict, in kwargs): Arbitrary additional payload to include with the log.
+        """
         self._log("error", message, **kwargs)
 
 
@@ -298,10 +380,21 @@ class LogQuery:
     """
 
     def __init__(self, db_path: Path):
+        """
+        Initialize the LogQuery bound to a specific SQLite logs database.
+        
+        Parameters:
+            db_path (Path): Filesystem path to the SQLite logs database used for queries.
+        """
         self.db_path = db_path
 
     def _connect(self) -> sqlite3.Connection:
-        """Get database connection."""
+        """
+        Open a new SQLite connection to the configured logs database with rows returned as sqlite3.Row.
+        
+        Returns:
+            sqlite3.Connection: A new SQLite connection to self.db_path with `row_factory` set to `sqlite3.Row`.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
@@ -319,21 +412,23 @@ class LogQuery:
         offset: int = 0,
     ) -> list[dict]:
         """
-        Query logs with filters.
-
-        Args:
-            level: Filter by log level
-            agent_id: Filter by agent ID
-            feature_id: Filter by feature ID
-            tool_name: Filter by tool name
-            search: Full-text search in message
-            since: Start datetime
-            until: End datetime
-            limit: Max results
-            offset: Pagination offset
-
+        Query structured logs using optional filters and pagination.
+        
+        Filters may restrict results by level, agent_id, feature_id, tool_name, a substring search of the message, and an inclusive time range. Results are ordered by timestamp descending.
+        
+        Parameters:
+            level (Optional[LogLevel]): Only include logs with this level.
+            agent_id (Optional[str]): Only include logs for this agent ID.
+            feature_id (Optional[int]): Only include logs for this feature ID.
+            tool_name (Optional[str]): Only include logs for this tool name.
+            search (Optional[str]): Substring to match in the `message` field.
+            since (Optional[datetime]): Include logs whose timestamp is >= this datetime.
+            until (Optional[datetime]): Include logs whose timestamp is <= this datetime.
+            limit (int): Maximum number of entries to return.
+            offset (int): Number of entries to skip (for pagination).
+        
         Returns:
-            List of log entries as dicts
+            list[dict]: Matching log rows as dictionaries with keys corresponding to the logs table (`id`, `timestamp`, `level`, `message`, `agent_id`, `feature_id`, `tool_name`, `duration_ms`, `extra`).
         """
         conn = self._connect()
         cursor = conn.cursor()
@@ -392,7 +487,18 @@ class LogQuery:
         feature_id: Optional[int] = None,
         since: Optional[datetime] = None,
     ) -> int:
-        """Count logs matching filters."""
+        """
+        Compute the number of log entries that match the provided filters.
+        
+        Parameters:
+            level (Optional[LogLevel]): If provided, only count entries with this log level.
+            agent_id (Optional[str]): If provided, only count entries for this agent_id.
+            feature_id (Optional[int]): If provided, only count entries with this feature_id.
+            since (Optional[datetime]): If provided, only count entries with timestamp greater than or equal to this value.
+        
+        Returns:
+            int: Number of matching log entries.
+        """
         conn = self._connect()
         cursor = conn.cursor()
 
@@ -425,9 +531,21 @@ class LogQuery:
         bucket_minutes: int = 5,
     ) -> list[dict]:
         """
-        Get activity timeline bucketed by time intervals.
-
-        Returns list of buckets with counts per agent.
+        Builds a time-bucketed activity timeline of logs.
+        
+        Each returned bucket represents a time interval (aligned to `bucket_minutes`) and aggregates per-agent log counts and error counts.
+        
+        Parameters:
+            since (Optional[datetime]): Start of the time range; defaults to 24 hours before now if omitted.
+            until (Optional[datetime]): End of the time range; defaults to now if omitted.
+            bucket_minutes (int): Length of each time bucket in minutes; buckets are aligned to minute boundaries (e.g., for 5 minutes: 00:00–00:04, 00:05–00:09).
+        
+        Returns:
+            list[dict]: A list of buckets ordered by time. Each bucket is a dict with:
+                - "timestamp": bucket start as an ISO-like string (YYYY-MM-DD HH:MM:00),
+                - "agents": mapping of agent_id (or "main" when null) to count of logs in that bucket,
+                - "total": total number of logs across all agents in the bucket,
+                - "errors": number of logs with level "error" in the bucket.
         """
         conn = self._connect()
         cursor = conn.cursor()
@@ -471,7 +589,22 @@ class LogQuery:
         return list(buckets.values())
 
     def get_agent_stats(self, since: Optional[datetime] = None) -> list[dict]:
-        """Get log statistics per agent."""
+        """
+        Compute per-agent log statistics optionally restricted to logs at or after `since`.
+        
+        Parameters:
+            since (Optional[datetime]): If provided, only logs with timestamp >= `since` are included.
+        
+        Returns:
+            list[dict]: A list of per-agent statistics dictionaries sorted by total descending. Each dictionary contains:
+                - agent_id (Optional[str]): The agent identifier (may be NULL in the DB).
+                - total (int): Total number of logs for the agent.
+                - info_count (int): Number of logs with level "info".
+                - warn_count (int): Number of logs with level "warn" or "warning".
+                - error_count (int): Number of logs with level "error".
+                - first_log (str): ISO-formatted timestamp of the agent's earliest matching log.
+                - last_log (str): ISO-formatted timestamp of the agent's latest matching log.
+        """
         conn = self._connect()
         cursor = conn.cursor()
 
@@ -510,15 +643,15 @@ class LogQuery:
         **filters,
     ) -> int:
         """
-        Export logs to file.
-
-        Args:
-            output_path: Output file path
-            format: Export format (json, jsonl, csv)
-            **filters: Query filters
-
+        Export logs matching the provided filters to a file in the specified format.
+        
+        Parameters:
+            output_path (Path): Destination file path for the exported logs.
+            format (str): Output format; one of "json", "jsonl", or "csv".
+            **filters: Keyword filters to select logs to export (e.g., level, agent_id, feature_id, tool_name, since, until, search).
+        
         Returns:
-            Number of exported entries
+            int: Number of log entries written to the file.
         """
         # Get all matching logs
         logs = self.query(limit=1000000, **filters)
@@ -553,28 +686,28 @@ def get_logger(
     console_output: bool = True,
 ) -> StructuredLogger:
     """
-    Get or create a structured logger for a project.
-
-    Args:
-        project_dir: Project directory
-        agent_id: Agent identifier (e.g., "coding-1", "initializer")
-        console_output: Whether to also log to console
-
+    Get or create a StructuredLogger for the given project directory.
+    
+    Parameters:
+        project_dir (Path): Path to the project directory where the logger's database will be stored.
+        agent_id (Optional[str]): Optional identifier for the agent to attach to emitted logs.
+        console_output (bool): If True, also attach a human-readable console handler.
+    
     Returns:
-        StructuredLogger instance
+        StructuredLogger: A logger instance configured for the specified project.
     """
     return StructuredLogger(project_dir, agent_id, console_output)
 
 
 def get_log_query(project_dir: Path) -> LogQuery:
     """
-    Get log query interface for a project.
-
-    Args:
-        project_dir: Project directory
-
+    Return a LogQuery bound to the project's logs SQLite database.
+    
+    Parameters:
+        project_dir (Path): Path to the project root; the logs database is located at `<project_dir>/.autocoder/logs.db`.
+    
     Returns:
-        LogQuery instance
+        LogQuery: A query interface for the project's logs database.
     """
     db_path = Path(project_dir) / ".autocoder" / "logs.db"
     return LogQuery(db_path)

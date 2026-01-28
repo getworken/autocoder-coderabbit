@@ -33,13 +33,12 @@ from security import (
 @contextmanager
 def temporary_home(home_path):
     """
-    Context manager to temporarily set HOME (and Windows equivalents).
-
-    Saves original environment variables and restores them on exit,
-    even if an exception occurs.
-
-    Args:
-        home_path: Path to use as temporary home directory
+    Temporarily set the process HOME to the given path and adjust Windows home-related variables for the context duration.
+    
+    The original environment variables HOME, USERPROFILE, HOMEDRIVE, and HOMEPATH are saved and restored on exit (restoration occurs even if an exception is raised inside the context).
+    
+    Parameters:
+        home_path (str | pathlib.Path): Path to use as the temporary home directory.
     """
     # Save original values for Unix and Windows
     saved_env = {
@@ -73,7 +72,18 @@ def temporary_home(home_path):
 
 
 def check_hook(command: str, should_block: bool) -> bool:
-    """Check a single command against the security hook (helper function)."""
+    """
+    Run the Bash security hook for a single command and verify it is blocked or allowed as expected.
+    
+    Prints a PASS/FAIL line for the command; on failure prints the expected vs actual decision and the hook's reason if provided.
+    
+    Parameters:
+        command (str): The shell command to evaluate.
+        should_block (bool): Whether the command is expected to be blocked.
+    
+    Returns:
+        bool: `True` if the hook's decision matches `should_block`, `False` otherwise.
+    """
     input_data = {"tool_name": "Bash", "tool_input": {"command": command}}
     result = asyncio.run(bash_security_hook(input_data))
     was_blocked = result.get("decision") == "block"
@@ -96,7 +106,12 @@ def check_hook(command: str, should_block: bool) -> bool:
 
 
 def test_extract_commands():
-    """Test the command extraction logic."""
+    """
+    Run a set of test cases that validate extract_commands and print per-case PASS/FAIL.
+    
+    Returns:
+        tuple: (passed, failed) — the number of tests that passed and the number that failed.
+    """
     print("\nTesting command extraction:\n")
     passed = 0
     failed = 0
@@ -167,7 +182,14 @@ def test_validate_chmod():
 
 
 def test_validate_init_script():
-    """Test init.sh script execution validation."""
+    """
+    Run a suite of test cases that validate allowed and blocked usages of an init.sh invocation.
+    
+    This function executes a set of predefined commands against validate_init_script and checks whether each is allowed or blocked as expected.
+    
+    Returns:
+        (passed, failed) (tuple[int, int]): Number of test cases that passed and failed.
+    """
     print("\nTesting init.sh validation:\n")
     passed = 0
     failed = 0
@@ -206,7 +228,14 @@ def test_validate_init_script():
 
 
 def test_pattern_matching():
-    """Test command pattern matching."""
+    """
+    Run unit tests for command pattern matching and return counts of passed and failed cases.
+    
+    Exercises matches_pattern across exact matches, prefix wildcards, bare-wildcard behavior, local and absolute script path handling, and various non-match scenarios. Prints PASS/FAIL for each case.
+    
+    Returns:
+        tuple[int, int]: (passed, failed) number of test cases that passed and failed.
+    """
     print("\nTesting pattern matching:\n")
     passed = 0
     failed = 0
@@ -265,7 +294,18 @@ def test_pattern_matching():
 
 
 def test_yaml_loading():
-    """Test YAML config loading and validation."""
+    """
+    Run test cases that exercise loading and validation of a project's YAML command configuration.
+    
+    Performs four checks against a temporary project .autocoder/allowed_commands.yaml:
+    1) Loads a valid YAML with three command entries.
+    2) Returns None when the config file is missing.
+    3) Returns None for invalid YAML content.
+    4) Rejects configurations that exceed the command limit (more than 100 entries).
+    
+    Returns:
+        (passed, failed) (tuple): Number of tests that passed and failed.
+    """
     print("\nTesting YAML loading:\n")
     passed = 0
     failed = 0
@@ -399,7 +439,14 @@ def test_blocklist_enforcement():
 
 
 def test_project_commands():
-    """Test project-specific commands in security hook."""
+    """
+    Run tests verifying project-scoped allowed commands and pattern matching for the Bash security hook.
+    
+    Performs three checks against a temporary project configuration: that a declared project command is allowed, that a wildcard pattern (e.g., `swift*`) matches tooling names, and that a non-declared command is blocked.
+    
+    Returns:
+        (passed, failed) (int, int): Tuple with the count of passed and failed test cases.
+    """
     print("\nTesting project-specific commands:\n")
     passed = 0
     failed = 0
@@ -458,7 +505,20 @@ commands:
 
 
 def test_org_config_loading():
-    """Test organization-level config loading."""
+    """
+    Verify loading and validation of organization-level configuration files.
+    
+    Runs a set of subtests that exercise:
+    - loading a valid org config,
+    - behavior when the config file is missing,
+    - rejection of non-string command names,
+    - rejection of empty command names,
+    - rejection of whitespace-only command names.
+    
+    Returns:
+        passed (int): Number of subtests that passed.
+        failed (int): Number of subtests that failed.
+    """
     print("\nTesting org config loading:\n")
     passed = 0
     failed = 0
@@ -551,7 +611,14 @@ allowed_commands:
 
 
 def test_hierarchy_resolution():
-    """Test command hierarchy resolution."""
+    """
+    Validate merging of organization, project, and global command configurations and enforcement of the hardcoded blocklist.
+    
+    Verifies that organization-level allowed commands are present in the effective allowed set, organization-level blocked commands are present in the effective blocked set, project-level commands are included, global default allowed commands (e.g., npm, git) are present, and built-in hardlisted commands cannot be overridden.
+    
+    Returns:
+        tuple: (passed, failed) counts of passing and failing assertions.
+    """
     print("\nTesting hierarchy resolution:\n")
     passed = 0
     failed = 0
@@ -635,7 +702,12 @@ commands:
 
 
 def test_org_blocklist_enforcement():
-    """Test that org-level blocked commands cannot be used."""
+    """
+    Verify organization-level blocked commands are enforced by the security hook.
+    
+    Returns:
+        (int, int): Tuple of (passed, failed) counts for this test.
+    """
     print("\nTesting org blocklist enforcement:\n")
     passed = 0
     failed = 0
@@ -972,6 +1044,16 @@ pkill_processes:
 
 
 def main():
+    """
+    Run the full security hook test suite, printing PASS/FAIL output and a final summary.
+    
+    Executes all unit and integration-style test groups for command extraction, validation,
+    pattern matching, YAML/org/project config loading, blocklist enforcement, injection
+    prevention, pkill extensibility, and example allow/block command checks.
+    
+    Returns:
+        int: 0 if all tests passed, 1 if any test failed.
+    """
     print("=" * 70)
     print("  SECURITY HOOK TESTS")
     print("=" * 70)

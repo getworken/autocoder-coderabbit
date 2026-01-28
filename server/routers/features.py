@@ -63,9 +63,11 @@ router = APIRouter(prefix="/api/projects/{project_name}/features", tags=["featur
 @contextmanager
 def get_db_session(project_dir: Path):
     """
-    Context manager for database sessions.
-    Ensures session is always closed, even on exceptions.
-    Properly rolls back on error to prevent PendingRollbackError.
+    Provide a context manager that yields a database session for a project's database.
+    
+    Yields a SQLAlchemy Session bound to the project's database. If an exception is raised inside the context, the session is rolled back before the exception propagates. The session is always closed on exit.
+    Returns:
+        session: The SQLAlchemy `Session` instance for the project's database.
     """
     create_database, _ = _get_db_classes()
     _, SessionLocal = create_database(project_dir)

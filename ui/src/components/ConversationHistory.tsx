@@ -44,6 +44,20 @@ function formatRelativeTime(dateString: string | null): string {
   return date.toLocaleDateString()
 }
 
+/**
+ * Render a conversation history dropdown for selecting or deleting past conversations.
+ *
+ * Displays a scrollable list of past conversations with message counts and relative update times,
+ * allows selecting a conversation (which closes the dropdown), and provides a confirmation dialog for deletion.
+ * The dropdown closes when `isOpen` is false or when the Escape key is pressed.
+ *
+ * @param projectName - The project identifier used to load and mutate conversations
+ * @param currentConversationId - The currently active conversation id; its list entry is shown as current and cannot be selected for switching
+ * @param isOpen - Whether the dropdown is visible
+ * @param onClose - Callback invoked to close the dropdown
+ * @param onSelectConversation - Callback invoked with a conversation id when a non-current conversation is selected
+ * @returns The rendered dropdown element, or `null` when `isOpen` is false
+ */
 export function ConversationHistory({
   projectName,
   currentConversationId,

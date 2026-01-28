@@ -9,6 +9,14 @@ interface ThemeSelectorProps {
   onThemeChange: (theme: ThemeId) => void
 }
 
+/**
+ * Render a hover-activated theme selector dropdown that previews themes on hover and applies a selection on click.
+ *
+ * @param themes - The list of available theme options to display in the dropdown.
+ * @param currentTheme - The identifier of the currently active theme.
+ * @param onThemeChange - Callback invoked with the chosen `ThemeId` when a theme is clicked.
+ * @returns A JSX element containing a button that opens a theme dropdown; hovering an item shows a temporary preview, and clicking an item applies the theme via `onThemeChange`.
+ */
 export function ThemeSelector({ themes, currentTheme, onThemeChange }: ThemeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [previewTheme, setPreviewTheme] = useState<ThemeId | null>(null)

@@ -42,13 +42,15 @@ DEFAULT_MAX_OUTPUT_TOKENS = "131072"
 
 async def _make_multimodal_message(content_blocks: list[dict]) -> AsyncGenerator[dict, None]:
     """
-    Create an async generator that yields a properly formatted multimodal message.
-
-    The Claude Agent SDK's query() method accepts either:
-    - A string (simple text)
-    - An AsyncIterable[dict] (for custom message formats)
-
-    This function wraps content blocks in the expected message format.
+    Wraps content blocks into a single multimodal user message generator.
+    
+    The yielded message dict follows the multimodal user-message structure expected by the Claude SDK: it places the provided content blocks under the message's content payload and includes session metadata.
+    
+    Parameters:
+        content_blocks (list[dict]): List of content-block dictionaries (e.g., text or image blocks) to include as the message content.
+    
+    Returns:
+        dict: A message dictionary formatted as a multimodal user message.
     """
     yield {
         "type": "user",
@@ -104,9 +106,16 @@ class SpecChatSession:
 
     async def start(self) -> AsyncGenerator[dict, None]:
         """
-        Initialize session and get initial greeting from Claude.
-
-        Yields message chunks as they stream in.
+        Initialize the spec creation session and begin streaming Claude's initial messages.
+        
+        Sets up project files and Claude SDK client, then yields events produced while Claude sends the Phase 1 greeting.
+        
+        Returns:
+            dict: Streamed event dictionaries representing conversation updates and control signals.
+                Typical events include:
+                - An "error" event with an error message if initialization or conversation start fails.
+                - Partial assistant message chunks as they arrive.
+                - A "response_done" event when the initial response stream completes.
         """
         # Load the create-spec skill
         skill_path = ROOT_DIR / ".claude" / "commands" / "create-spec.md"

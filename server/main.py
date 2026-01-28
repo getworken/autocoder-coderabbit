@@ -69,7 +69,11 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager for startup and shutdown."""
+    """
+    Manage application startup and shutdown lifecycle tasks.
+    
+    On startup, removes leftover agent processes and lock files from previous runs and starts the scheduler. On shutdown, stops the scheduler first, then cleans up managers, assistant and expand sessions, terminals, and dev servers in that order to ensure no new tasks are scheduled before resources are torn down.
+    """
     # Startup - clean up orphaned processes from previous runs (Windows)
     cleanup_orphaned_agent_processes()
 
@@ -145,12 +149,9 @@ if is_basic_auth_enabled():
     @app.middleware("http")
     async def basic_auth_middleware(request: Request, call_next):
         """
-        HTTP Basic Auth middleware.
-
-        Enabled when both BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD
-        environment variables are set.
-
-        For WebSocket endpoints, auth is checked in the WebSocket handler.
+        Enforces HTTP Basic authentication for incoming non-WebSocket HTTP requests.
+        
+        WebSocket upgrade requests are skipped. Returns the downstream response when credentials are valid; returns a 401 Response if the Authorization header is missing, malformed, or credentials are invalid.
         """
         # Skip auth for WebSocket upgrade requests (handled separately)
         if request.headers.get("upgrade", "").lower() == "websocket":
@@ -191,7 +192,15 @@ if is_basic_auth_enabled():
 if not ALLOW_REMOTE:
     @app.middleware("http")
     async def require_localhost(request: Request, call_next):
-        """Only allow requests from localhost (disabled when AUTOCODER_ALLOW_REMOTE=1)."""
+        """
+        Reject requests from non-localhost clients by returning a 403 error.
+        
+        Raises:
+            HTTPException: with status code 403 when the request's client host is not a localhost address (127.0.0.1, ::1, or 'localhost').
+        
+        Returns:
+            The response produced by the downstream request handler.
+        """
         client_host = request.client.host if request.client else None
 
         # Allow localhost connections

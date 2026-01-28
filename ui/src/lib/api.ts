@@ -80,12 +80,28 @@ export async function getProject(name: string): Promise<ProjectDetail> {
   return fetchJSON(`/projects/${encodeURIComponent(name)}`)
 }
 
+/**
+ * Delete the project with the given name from the server.
+ *
+ * @param name - The project name to delete
+ */
 export async function deleteProject(name: string): Promise<void> {
   await fetchJSON(`/projects/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   })
 }
 
+/**
+ * Trigger a reset for the specified project on the server.
+ *
+ * @param name - The project name or identifier
+ * @param fullReset - If `true`, perform a full reset that removes generated files; if `false`, perform a partial reset
+ * @returns An object with the reset result:
+ * - `success`: `true` if the reset succeeded, `false` otherwise
+ * - `message`: human-readable status or error message
+ * - `deleted_files`: list of file paths that were deleted during the reset
+ * - `full_reset`: `true` if a full reset was performed, `false` otherwise
+ */
 export async function resetProject(name: string, fullReset: boolean = false): Promise<{
   success: boolean
   message: string
@@ -97,12 +113,25 @@ export async function resetProject(name: string, fullReset: boolean = false): Pr
   })
 }
 
+/**
+ * Opens the specified project in the given IDE.
+ *
+ * @param name - The project name or identifier
+ * @param ide - The IDE identifier or name to open the project in
+ * @returns An object with `status` describing the operation result and `message` containing a human-readable message
+ */
 export async function openProjectInIDE(name: string, ide: string): Promise<{ status: string; message: string }> {
   return fetchJSON(`/projects/${encodeURIComponent(name)}/open-in-ide?ide=${encodeURIComponent(ide)}`, {
     method: 'POST',
   })
 }
 
+/**
+ * Retrieve the prompt configuration for a project.
+ *
+ * @param name - The project name
+ * @returns The project's `ProjectPrompts` object
+ */
 export async function getProjectPrompts(name: string): Promise<ProjectPrompts> {
   return fetchJSON(`/projects/${encodeURIComponent(name)}/prompts`)
 }
@@ -512,6 +541,12 @@ export async function deleteSchedule(
   })
 }
 
+/**
+ * Fetches the next scheduled run for a project.
+ *
+ * @param projectName - The project name used in the request path
+ * @returns Details of the next scheduled run as a `NextRunResponse`
+ */
 export async function getNextScheduledRun(projectName: string): Promise<NextRunResponse> {
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/schedules/next`)
 }
@@ -536,10 +571,20 @@ export interface KnowledgeFileContent {
   content: string
 }
 
+/**
+ * Retrieve the list of knowledge files for a project.
+ *
+ * @returns A `KnowledgeFileList` containing the project's knowledge files and the total `count`
+ */
 export async function listKnowledgeFiles(projectName: string): Promise<KnowledgeFileList> {
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/knowledge`)
 }
 
+/**
+ * Retrieves the content of a knowledge file for a project.
+ *
+ * @returns The knowledge file's `name` and `content`.
+ */
 export async function getKnowledgeFile(
   projectName: string,
   filename: string
@@ -547,6 +592,11 @@ export async function getKnowledgeFile(
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/knowledge/${encodeURIComponent(filename)}`)
 }
 
+/**
+ * Uploads a knowledge file to the specified project.
+ *
+ * @returns The stored knowledge file's `name` and `content` as a `KnowledgeFileContent` object
+ */
 export async function uploadKnowledgeFile(
   projectName: string,
   filename: string,
@@ -558,6 +608,12 @@ export async function uploadKnowledgeFile(
   })
 }
 
+/**
+ * Delete a knowledge file from the specified project.
+ *
+ * @param projectName - The project name or identifier containing the knowledge file
+ * @param filename - The name of the knowledge file to delete
+ */
 export async function deleteKnowledgeFile(
   projectName: string,
   filename: string

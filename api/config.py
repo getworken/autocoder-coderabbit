@@ -114,12 +114,22 @@ class AutocoderConfig(BaseSettings):
 
     @property
     def is_using_alternative_api(self) -> bool:
-        """Check if using an alternative API provider (not Claude directly)."""
+        """
+        Indicates whether an alternative Anthropic-compatible API endpoint and auth token are configured.
+        
+        Returns:
+            True if both `anthropic_base_url` and `anthropic_auth_token` are set, False otherwise.
+        """
         return bool(self.anthropic_base_url and self.anthropic_auth_token)
 
     @property
     def is_using_ollama(self) -> bool:
-        """Check if using Ollama local models."""
+        """
+        Determine whether the configuration targets a local Ollama instance.
+        
+        Returns:
+            `true` if `anthropic_base_url` is set, `anthropic_auth_token` equals `"ollama"`, and the base URL's hostname is `localhost`, `127.0.0.1`, or `::1`; `false` otherwise.
+        """
         if not self.anthropic_base_url or self.anthropic_auth_token != "ollama":
             return False
         host = urlparse(self.anthropic_base_url).hostname or ""
@@ -131,12 +141,13 @@ _config: Optional[AutocoderConfig] = None
 
 
 def get_config() -> AutocoderConfig:
-    """Get the global configuration instance.
-
-    Creates the config on first access (lazy loading).
-
+    """
+    Retrieve the global AutocoderConfig singleton.
+    
+    Creates and caches the AutocoderConfig on first access by loading settings from the environment and .env file.
+    
     Returns:
-        The global AutocoderConfig instance.
+        The global AutocoderConfig instance; created on first access if not already initialized.
     """
     global _config
     if _config is None:
@@ -145,12 +156,11 @@ def get_config() -> AutocoderConfig:
 
 
 def reload_config() -> AutocoderConfig:
-    """Reload configuration from environment.
-
-    Useful after environment changes or for testing.
-
+    """
+    Reloads the global AutocoderConfig by re-reading environment variables.
+    
     Returns:
-        The reloaded AutocoderConfig instance.
+        AutocoderConfig: The reloaded configuration instance.
     """
     global _config
     _config = AutocoderConfig()

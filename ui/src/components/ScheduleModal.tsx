@@ -43,6 +43,17 @@ interface ScheduleModalProps {
   onClose: () => void
 }
 
+/**
+ * Modal for viewing, creating, enabling/disabling, and deleting agent schedules for a project.
+ *
+ * Manages local form state for creating schedules (start time, duration, days, YOLO mode, concurrency, optional model),
+ * converts between local and UTC times with day-shift adjustments, and exposes actions to create, toggle, and delete schedules.
+ *
+ * @param projectName - The project identifier whose schedules are managed
+ * @param isOpen - Whether the modal is currently open
+ * @param onClose - Callback invoked when the modal should be closed
+ * @returns A React element rendering the schedule management modal
+ */
 export function ScheduleModal({ projectName, isOpen, onClose }: ScheduleModalProps) {
   const modalRef = useRef<HTMLDivElement>(null)
   const firstFocusableRef = useRef<HTMLButtonElement>(null)

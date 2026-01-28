@@ -37,6 +37,14 @@ export function useCreateProject() {
   })
 }
 
+/**
+ * Provides a React Query mutation for deleting a project by name.
+ *
+ * The mutation calls the API to delete the specified project and, on success,
+ * invalidates the cached project list so it is refetched.
+ *
+ * @returns A mutation object whose mutate/mutateAsync function accepts a single `name` string (the project name) and deletes that project.
+ */
 export function useDeleteProject() {
   const queryClient = useQueryClient()
 
@@ -48,6 +56,11 @@ export function useDeleteProject() {
   })
 }
 
+/**
+ * Provides a mutation hook to reset a project and refresh related cached data.
+ *
+ * @returns A React Query mutation object that accepts `{ name: string; fullReset?: boolean }` and, when executed, calls the API to reset the specified project. On success it invalidates the `['projects']`, `['features', name]`, and `['project', name]` query keys so related data is refetched.
+ */
 export function useResetProject() {
   const queryClient = useQueryClient()
 
@@ -257,6 +270,13 @@ const DEFAULT_SETTINGS: Settings = {
   preferred_ide: null,
 }
 
+/**
+ * Fetches the list of available models for selection and display.
+ *
+ * The query provides cached model data (placeholder data is returned while loading)
+ * and refreshes at most every 5 minutes.
+ *
+ * @returns The current array of available models from cache or the API. While loading, `DEFAULT_MODELS` are returned as placeholder data.
 export function useAvailableModels() {
   return useQuery({
     queryKey: ['available-models'],
